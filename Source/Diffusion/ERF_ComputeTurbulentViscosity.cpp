@@ -275,6 +275,18 @@ void ComputeTurbulentViscosityLES (Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             });
         }
     }
+    // SMS-3DTKE: Scale-adaptive 3D TKE scheme
+    //***********************************************************************************
+    else if (turbChoice.les_type == LESType::SMS3DTKE)
+    {
+        ComputeTurbulentViscositySMS3DTKE(Tau_lev, cons_in, eddyViscosity,
+                                          Hfx1, Hfx2, Hfx3, Diss,
+                                          geom, use_terrain_fitted_coords,
+                                          mapfac, z_phys_nd, z_phys_cc,
+                                          turbChoice, const_grav,
+                                          SurfLayer, moisture_indices,
+                                          xvel, yvel);
+    }
 
     // Extrapolate Kturb in x/y, fill remaining elements (relevant to lev==0)
     //***********************************************************************************
@@ -285,7 +297,8 @@ void ComputeTurbulentViscosityLES (Vector<std::unique_ptr<MultiFab>>& Tau_lev,
     Gpu::copy(Gpu::hostToDevice, Factors.begin(), Factors.end(), d_Factors.begin());
     Real* fac_ptr = d_Factors.data();
 
-    const bool use_KE = ( turbChoice.les_type == LESType::Deardorff );
+    const bool use_KE = ( turbChoice.les_type == LESType::Deardorff ||
+                          turbChoice.les_type == LESType::SMS3DTKE );
 
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())

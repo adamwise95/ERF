@@ -79,6 +79,30 @@ ComputeTurbulentViscosityLES_EB (amrex::Vector<std::unique_ptr<amrex::MultiFab>>
                               const amrex::MultiFab* xvel = nullptr,
                               const amrex::MultiFab* yvel = nullptr);
 
+/**
+ * Compute turbulent viscosity using SMS-3DTKE scale-adaptive TKE scheme
+ * Reference: Zhang et al. (2018), MWR 146:2023-2045
+ */
+void
+ComputeTurbulentViscositySMS3DTKE (amrex::Vector<std::unique_ptr<amrex::MultiFab>>& Tau_lev,
+                                   const amrex::MultiFab& cons_in,
+                                   amrex::MultiFab& eddyViscosity,
+                                   amrex::MultiFab& Hfx1,
+                                   amrex::MultiFab& Hfx2,
+                                   amrex::MultiFab& Hfx3,
+                                   amrex::MultiFab& Diss,
+                                   const amrex::Geometry& geom,
+                                   bool use_terrain_fitted_coords,
+                                   amrex::Vector<std::unique_ptr<amrex::MultiFab>>& mapfac,
+                                   const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
+                                   const std::unique_ptr<amrex::MultiFab>& z_phys_cc,
+                                   const TurbChoice& turbChoice,
+                                   const amrex::Real const_grav,
+                                   std::unique_ptr<SurfaceLayer>& SurfLayer,
+                                   const MoistureComponentIndices& moisture_indices,
+                                   const amrex::MultiFab* xvel = nullptr,
+                                   const amrex::MultiFab* yvel = nullptr);
+
 AMREX_GPU_DEVICE
 AMREX_FORCE_INLINE
 amrex::Real
