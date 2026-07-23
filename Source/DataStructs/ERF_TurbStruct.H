@@ -3,7 +3,7 @@
 
 #include <ERF_MYNNStruct.H>
 
-AMREX_ENUM(LESType, None, Smagorinsky, Smagorinsky2D, Deardorff);
+AMREX_ENUM(LESType, None, Smagorinsky, Smagorinsky2D, Deardorff, SMS3DTKE);
 
 AMREX_ENUM(RANSType, None, kEqn);
 
@@ -74,6 +74,42 @@ query_one_or_per_level_enum_case_insensitive (
     return 0; // avoid compiler warning
   }
 }
+
+/**
+ * Container for SMS-3DTKE scale-adaptive TKE scheme parameters
+ * Based on Zhang et al. (2018), MWR 146:2023-2045
+ */
+struct SMS3DTKEParams {
+    // Master mixing length coefficients (Zhang et al. 2018, Eq. 28-33)
+    amrex::Real alpha_s = amrex::Real(1.0);      // Surface layer coefficient
+    amrex::Real alpha_1 = amrex::Real(1.9);      // Buoyancy length coefficient
+    amrex::Real alpha_2 = amrex::Real(0.9);      // Integral length coefficient
+    amrex::Real alpha_3 = amrex::Real(1.0);      // (unused in paper)
+    amrex::Real alpha_4 = amrex::Real(5.0);      // Minimum length coefficient
+
+    // Blending constants for scale-adaptive partitioning
+    amrex::Real c_k1 = amrex::Real(0.1);         // LES mixing weight
+    amrex::Real c_k2 = amrex::Real(0.4);         // Mesoscale mixing weight
+    amrex::Real c_eps1_base = amrex::Real(0.19); // LES dissipation base (1/(0.19 + 0.74*l_LES/Delta))
+    amrex::Real c_eps1_slope = amrex::Real(0.74);// LES dissipation slope
+    amrex::Real c_eps2 = amrex::Real(3.5);       // Mesoscale dissipation coefficient
+
+    // Nonlocal heat flux profile parameters (Zhang et al. 2018, Eq. 23-24)
+    amrex::Real delta_SBL = amrex::Real(0.08);   // Surface layer thickness fraction
+    amrex::Real d1_EZ = amrex::Real(0.02);       // Entrainment zone coeff 1
+    amrex::Real d2_EZ = amrex::Real(0.05);       // Entrainment zone coeff 2
+
+    // Nonlocal momentum flux parameter (Zhang et al. 2018, Eq. 27)
+    amrex::Real S_m = amrex::Real(15.9);         // Momentum countergradient coefficient
+
+    // Horizontal diffusion blending (Zhang et al. 2018, Eq. 40)
+    amrex::Real c_h = amrex::Real(0.1);          // Horizontal mixing coefficient
+
+    // Enable/disable features
+    bool use_nonlocal_heat = true;               // Enable nonlocal heat flux (mesoscale)
+    bool use_nonlocal_momentum = true;           // Enable nonlocal momentum flux (mesoscale)
+    bool use_horizontal_blend = true;            // Enable scale-adaptive horizontal diffusion
+};
 
 /**
  * Container holding quantities related to turbulence parametrizations
@@ -270,6 +306,30 @@ public:
         query_one_or_per_level(pp, "Ck", Ck, lev, max_level);
         query_one_or_per_level(pp, "Ce", Ce, lev, max_level);
         query_one_or_per_level(pp, "Ce_wall", Ce_wall, lev, max_level);
+    } else if (les_type == LESType::SMS3DTKE) {
+        // SMS-3DTKE master mixing length coefficients
+        query_one_or_per_level(pp, "sms3dtke_alpha_s", sms3dtke.alpha_s, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_alpha_1", sms3dtke.alpha_1, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_alpha_2", sms3dtke.alpha_2, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_alpha_3", sms3dtke.alpha_3, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_alpha_4", sms3dtke.alpha_4, lev, max_level);
+        // Blending constants
+        query_one_or_per_level(pp, "sms3dtke_c_k1", sms3dtke.c_k1, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_c_k2", sms3dtke.c_k2, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_c_eps1_base", sms3dtke.c_eps1_base, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_c_eps1_slope", sms3dtke.c_eps1_slope, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_c_eps2", sms3dtke.c_eps2, lev, max_level);
+        // Nonlocal flux parameters
+        query_one_or_per_level(pp, "sms3dtke_delta_SBL", sms3dtke.delta_SBL, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_d1_EZ", sms3dtke.d1_EZ, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_d2_EZ", sms3dtke.d2_EZ, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_S_m", sms3dtke.S_m, lev, max_level);
+        // Horizontal diffusion
+        query_one_or_per_level(pp, "sms3dtke_c_h", sms3dtke.c_h, lev, max_level);
+        // Enable/disable features
+        query_one_or_per_level(pp, "sms3dtke_use_nonlocal_heat", sms3dtke.use_nonlocal_heat, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_use_nonlocal_momentum", sms3dtke.use_nonlocal_momentum, lev, max_level);
+        query_one_or_per_level(pp, "sms3dtke_use_horizontal_blend", sms3dtke.use_horizontal_blend, lev, max_level);
     }
 
     // To quantify atmospheric stability for subgrid modeling
@@ -306,9 +366,11 @@ public:
       ((les_type != LESType::None) || (rans_type != RANSType::None) ||
        (pbl_type != PBLType::None));
     use_keqn =
-      ((les_type == LESType::Deardorff) || (rans_type == RANSType::kEqn));
+      ((les_type == LESType::Deardorff) || (les_type == LESType::SMS3DTKE) ||
+       (rans_type == RANSType::kEqn));
     use_tke =
-      ((les_type == LESType::Deardorff) || (rans_type == RANSType::kEqn) ||
+      ((les_type == LESType::Deardorff) || (les_type == LESType::SMS3DTKE) ||
+       (rans_type == RANSType::kEqn)    ||
        (pbl_type == PBLType::MYJ)       || (pbl_type == PBLType::MYNN25) ||
        (pbl_type == PBLType::MYNNEDMF)  || uses_shoc_family());
 
@@ -364,6 +426,8 @@ public:
       }
     } else if (les_type == LESType::Deardorff) {
       amrex::Print() << "    Using Deardorff LES model at level " << lev << std::endl;
+    } else if (les_type == LESType::SMS3DTKE) {
+      amrex::Print() << "    Using SMS-3DTKE scale-adaptive LES model at level " << lev << std::endl;
     } else if (rans_type == RANSType::kEqn) {
       amrex::Print()
         << "    Using Axell & Liungman one-equation RANS k model at level " << lev
@@ -402,6 +466,23 @@ public:
         amrex::Real Cs_equiv = std::sqrt(Ck * std::sqrt(Ck / Ce));
         amrex::Print() << "    equivalent Cs           : " << Cs_equiv
                        << std::endl;
+      }
+      if (les_type == LESType::SMS3DTKE) {
+        amrex::Print() << "    SMS-3DTKE Master Mixing Length Coefficients:" << std::endl;
+        amrex::Print() << "      alpha_s (surface)     : " << sms3dtke.alpha_s << std::endl;
+        amrex::Print() << "      alpha_1 (buoyancy)    : " << sms3dtke.alpha_1 << std::endl;
+        amrex::Print() << "      alpha_2 (integral)    : " << sms3dtke.alpha_2 << std::endl;
+        amrex::Print() << "      alpha_4 (minimum)     : " << sms3dtke.alpha_4 << std::endl;
+        amrex::Print() << "    SMS-3DTKE Blending Constants:" << std::endl;
+        amrex::Print() << "      c_k1 (LES weight)     : " << sms3dtke.c_k1 << std::endl;
+        amrex::Print() << "      c_k2 (meso weight)    : " << sms3dtke.c_k2 << std::endl;
+        amrex::Print() << "      c_eps1_base           : " << sms3dtke.c_eps1_base << std::endl;
+        amrex::Print() << "      c_eps2                : " << sms3dtke.c_eps2 << std::endl;
+        amrex::Print() << "    SMS-3DTKE Nonlocal Parameters:" << std::endl;
+        amrex::Print() << "      S_m (momentum)        : " << sms3dtke.S_m << std::endl;
+        amrex::Print() << "      use_nonlocal_heat     : " << sms3dtke.use_nonlocal_heat << std::endl;
+        amrex::Print() << "      use_nonlocal_momentum : " << sms3dtke.use_nonlocal_momentum << std::endl;
+        amrex::Print() << "      use_horizontal_blend  : " << sms3dtke.use_horizontal_blend << std::endl;
       }
       amrex::Print() << "    isotropic mixing        : " << mix_isotropic
                      << std::endl;
@@ -526,6 +607,9 @@ public:
   amrex::Real Ce = amrex::Real(0.93);
   amrex::Real Ce_wall = zero; // if > 0, then set Ce to this at k=0
   amrex::Real Ck = amrex::Real(0.1);
+
+  // SMS-3DTKE (Zhang et al. 2018)
+  SMS3DTKEParams sms3dtke;
 
   // k-eqn RANS coefficients (Axell & Liungman 2001)
   amrex::Real Cmu0 = amrex::Real(0.5562);
