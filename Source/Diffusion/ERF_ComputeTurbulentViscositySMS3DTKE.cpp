@@ -82,6 +82,7 @@ Showed improved performance in gray zone (500m-3km resolutions)
 #include "ERF_SurfaceLayer.H"
 #include "ERF_DirectionSelector.H"
 #include "ERF_Diffusion.H"
+#include "ERF_EddyViscosity.H"
 #include "ERF_Constants.H"
 #include "ERF_TurbStruct.H"
 #include "ERF_PBLModels.H"
@@ -169,6 +170,94 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                            nullptr, moisture_indices);
 
     //==========================================================================
+    // Compute integral length scale L_T via column integration
+    // Zhang et al. (2018), Eq. 30:
+    //   L_T = α_2 * ∫[0 to z_i] e^(1/2) dz / ∫[0 to z_i] e^(-1/2) dz
+    //==========================================================================
+    MultiFab L_T_mf(cons_in.boxArray(), cons_in.DistributionMap(), 2, 1);
+    L_T_mf.setVal(0.0); // Will accumulate integrals: component 0 = numerator, 1 = denominator
+
+    for (MFIter mfi(L_T_mf, TileNoZ()); mfi.isValid(); ++mfi)
+    {
+        const Box& domain_box = geom.Domain();
+        Box gtbx = mfi.growntilebox();
+        gtbx.setSmall(2, domain_box.smallEnd(2));
+        gtbx.setBig(2, domain_box.bigEnd(2));
+
+        const auto cons_arr = cons_in.const_array(mfi);
+        const auto pblh_arr = pblh_mf.const_array(mfi);
+        auto L_T_arr = L_T_mf.array(mfi);
+
+        if (z_phys_cc) {
+            const auto z_cc = z_phys_cc->const_array(mfi);
+
+            // Column integration with terrain
+            ParallelFor(gtbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+            {
+                Real zi = pblh_arr(i, j, 0);
+                Real z_agl = z_cc(i, j, k);
+
+                // Only integrate within PBL
+                if (z_agl <= zi) {
+                    Real rho = cons_arr(i, j, k, Rho_comp);
+                    Real e = amrex::max(cons_arr(i, j, k, RhoKE_comp) / rho, Real(0.0));
+                    Real sqrt_e = std::sqrt(e);
+                    Real inv_sqrt_e = (e > Real(1.0e-6)) ? (one / sqrt_e) : Real(0.0);
+
+                    Real dz = (k > 0) ? (z_cc(i, j, k) - z_cc(i, j, k-1)) : z_cc(i, j, 0);
+
+                    // Accumulate integrals: numerator = ∫sqrt(e) dz, denominator = ∫1/sqrt(e) dz
+                    atomicAdd(&L_T_arr(i, j, 0), sqrt_e * dz);
+                    atomicAdd(&L_T_arr(i, j, 1), inv_sqrt_e * dz); // Need 2 components!
+                }
+            });
+        } else {
+            // Uniform grid
+            const Real dz = geom.CellSize(2);
+
+            ParallelFor(gtbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+            {
+                Real zi = pblh_arr(i, j, 0);
+                Real z_agl = (k + myhalf) * dz;
+
+                if (z_agl <= zi) {
+                    Real rho = cons_arr(i, j, k, Rho_comp);
+                    Real e = amrex::max(cons_arr(i, j, k, RhoKE_comp) / rho, Real(0.0));
+                    Real sqrt_e = std::sqrt(e);
+                    Real inv_sqrt_e = (e > Real(1.0e-6)) ? (one / sqrt_e) : Real(0.0);
+
+                    atomicAdd(&L_T_arr(i, j, 0), sqrt_e * dz);
+                    atomicAdd(&L_T_arr(i, j, 1), inv_sqrt_e * dz);
+                }
+            });
+        }
+    }
+
+    // Finalize: L_T = α_2 * (numerator / denominator)
+    for (MFIter mfi(L_T_mf); mfi.isValid(); ++mfi)
+    {
+        auto L_T_arr = L_T_mf.array(mfi);
+        const auto pblh_arr = pblh_mf.const_array(mfi);
+        Box bx = mfi.tilebox();
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        {
+            Real numerator = L_T_arr(i, j, 0);
+            Real denominator = L_T_arr(i, j, 1);
+            Real pblh_val = pblh_arr(i, j, 0);
+
+            if (denominator > Real(1.0e-6) && numerator > Real(1.0e-6)) {
+                L_T_arr(i, j, 0) = sms.alpha_2 * numerator / denominator;
+            } else {
+                // Fallback to proportional estimate
+                L_T_arr(i, j, 0) = sms.alpha_2 * pblh_val;
+            }
+            // Clear component 1 (no longer needed)
+            L_T_arr(i, j, 1) = zero;
+        });
+    }
+
+    //==========================================================================
     // Get surface layer parameters if available
     //==========================================================================
     const MultiFab* u_star_mf = nullptr;
@@ -203,8 +292,14 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
         Array4<Real const> z_nd_arr = z_phys_nd->const_array(mfi);
         Array4<Real const> z_cc_arr = z_phys_cc->const_array(mfi);
 
-        // Get PBL height and surface parameters
+        // Get strain rate tensors for horizontal diffusion (Zhang et al. Eq. 40)
+        Array4<Real const> tau11 = Tau_lev[TauType::tau11]->const_array(mfi);
+        Array4<Real const> tau22 = Tau_lev[TauType::tau22]->const_array(mfi);
+        Array4<Real const> tau12 = Tau_lev[TauType::tau12]->const_array(mfi);
+
+        // Get PBL height, integral length, and surface parameters
         Array4<Real const> pblh_arr = pblh_mf.const_array(mfi);
+        Array4<Real const> L_T_arr = L_T_mf.const_array(mfi);
 
         Array4<Real const> u_star_arr = (u_star_mf) ? u_star_mf->const_array(mfi) : Array4<Real const>{};
         Array4<Real const> t_star_arr = (t_star_mf) ? t_star_mf->const_array(mfi) : Array4<Real const>{};
@@ -309,9 +404,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real L_S = SMS3DTKE_Length_Surface(z_agl, kappa, sms.alpha_s);
 
             // Integral length (Zhang et al. 2018, Eq. 30)
-            // Uses simplified form proportional to PBL height
-            // Full implementation would require column integration of TKE profile
-            Real L_T = SMS3DTKE_Length_Integral_Simple(E, zi, z_agl, sms.alpha_2);
+            // From column integration: L_T = α_2 * ∫√e dz / ∫(1/√e) dz
+            Real L_T = L_T_arr(i, j, 0);
 
             // Buoyancy length (Zhang et al. 2018, Eq. 31)
             Real alpha_k_meso = sms.c_k2; // Mesoscale mixing coefficient
@@ -352,12 +446,26 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real K_m_h, K_h_h;
             if (sms.use_horizontal_blend) {
                 // Zhang et al. 2018, Eq. 40: blend Smagorinsky and TKE-based
-                // TODO: Get horizontal deformation rate from Tau_lev
-                // For now, use simplified TKE-based approach
-                Real DeltaH = (isotropic) ? L_Delta : Delta_h;
-                K_m_h = alpha_k * DeltaH * sqrt_E;
+                // Extract horizontal strain components (interpolated to cell center)
+                Real s11 = tau11(i, j, k);
+                Real s22 = tau22(i, j, k);
+                Real s12 = fourth * (tau12(i, j, k) + tau12(i, j+1, k) +
+                                     tau12(i+1, j, k) + tau12(i+1, j+1, k));
+
+                // Horizontal deformation rate D_h
+                Real D_h = SMS3DTKE_Horizontal_Deformation(s11, s22, s12);
+
+                // Smagorinsky component: K_D = (c_h * l_v)² * D_h
+                Real K_D = sms.c_h * sms.c_h * l_v * l_v * D_h;
+
+                // TKE component: K_T = c_k * l_v * √e
+                Real K_T = alpha_k * l_v * sqrt_E;
+
+                // Blend: K_h = P_L * K_D + (1 - P_L) * K_T
+                K_m_h = P_L * K_D + (one - P_L) * K_T;
                 K_h_h = K_m_h * inv_Pr_t;
             } else {
+                // Simple TKE-based without deformation blending
                 Real DeltaH = (isotropic) ? L_Delta : Delta_h;
                 K_m_h = alpha_k * DeltaH * sqrt_E;
                 K_h_h = K_m_h * inv_Pr_t;

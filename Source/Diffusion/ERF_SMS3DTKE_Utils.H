@@ -320,6 +320,28 @@ amrex::Real SMS3DTKE_Dissipation_Coefficient_LES(amrex::Real l_LES,
 }
 
 /**
+ * @brief Compute horizontal deformation rate D_h
+ *
+ * Zhang et al. (2018), Eq. 40 uses horizontal deformation for blending:
+ *   D_h = √(2 * S_h_ij * S_h_ij)
+ * where S_h_ij includes only horizontal strain components (11, 22, 12)
+ *
+ * @param s11  Horizontal strain ∂u/∂x [1/s]
+ * @param s22  Horizontal strain ∂v/∂y [1/s]
+ * @param s12  Shear strain 0.5*(∂u/∂y + ∂v/∂x) [1/s]
+ * @return     Horizontal deformation rate [1/s]
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real SMS3DTKE_Horizontal_Deformation(amrex::Real s11,
+                                             amrex::Real s22,
+                                             amrex::Real s12) noexcept
+{
+    // S_ij : S_ij for horizontal components only
+    amrex::Real S_h_ij_squared = s11*s11 + s22*s22 + amrex::Real(2.0)*s12*s12;
+    return std::sqrt(amrex::Real(2.0) * S_h_ij_squared);
+}
+
+/**
  * @brief Harmonic average of multiple length scales
  *
  * Zhang et al. (2018), Eq. 28:
