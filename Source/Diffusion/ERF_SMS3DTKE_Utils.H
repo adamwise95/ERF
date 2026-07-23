@@ -96,6 +96,33 @@ amrex::Real SMS3DTKE_Partition_TKE(amrex::Real Delta_over_zi) noexcept
 //==============================================================================
 
 /**
+ * @brief Integral length scale L_T via vertical integration
+ *
+ * Zhang et al. (2018), Eq. 30:
+ *   L_T = α_2 * ∫[0 to z_i] e^(1/2) dz / ∫[0 to z_i] e^(-1/2) dz
+ *
+ * Simplified form for column computation:
+ *   L_T ≈ α_2 * Σ[e_k^(1/2) * Δz_k] / Σ[e_k^(-1/2) * Δz_k]
+ *
+ * @param e         TKE at current level [m²/s²]
+ * @param zi        PBL height [m]
+ * @param z_agl     Height above ground [m]
+ * @param alpha_2   Integral length coefficient (default 0.9)
+ * @return          Integral length scale [m]
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real SMS3DTKE_Length_Integral_Simple(amrex::Real e,
+                                             amrex::Real zi,
+                                             amrex::Real z_agl,
+                                             amrex::Real alpha_2) noexcept
+{
+    // Simplified: use characteristic length ~ PBL height
+    // For proper implementation, would need vertical integration
+    // over TKE profile from surface to z_i
+    return alpha_2 * zi;
+}
+
+/**
  * @brief Surface layer mixing length L_S
  *
  * Zhang et al. (2018), Eq. 29:

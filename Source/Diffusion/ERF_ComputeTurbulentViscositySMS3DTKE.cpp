@@ -158,6 +158,29 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
     // von Kármán constant
     const Real kappa = CONST_KARMAN;
 
+    //==========================================================================
+    // Compute PBL height using MYNN hybrid method
+    //==========================================================================
+    MultiFab pblh_mf(cons_in.boxArray(), cons_in.DistributionMap(), 1, 1);
+    pblh_mf.setVal(1000.0); // Default fallback value
+
+    MYNNPBLH pblh_calc;
+    pblh_calc.compute_pblh(geom, z_phys_cc.get(), &pblh_mf, cons_in,
+                           nullptr, moisture_indices);
+
+    //==========================================================================
+    // Get surface layer parameters if available
+    //==========================================================================
+    const MultiFab* u_star_mf = nullptr;
+    const MultiFab* t_star_mf = nullptr;
+    const MultiFab* w_star_mf = nullptr;
+
+    if (SurfLayer) {
+        u_star_mf = SurfLayer->get_u_star(0);
+        t_star_mf = SurfLayer->get_t_star(0);
+        w_star_mf = SurfLayer->get_w_star(0);
+    }
+
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
@@ -180,8 +203,14 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
         Array4<Real const> z_nd_arr = z_phys_nd->const_array(mfi);
         Array4<Real const> z_cc_arr = z_phys_cc->const_array(mfi);
 
-        // TODO: Get surface layer parameters (u*, θ*, w*, PBL height)
-        // For now, will compute internally or use simplified estimates
+        // Get PBL height and surface parameters
+        Array4<Real const> pblh_arr = pblh_mf.const_array(mfi);
+
+        Array4<Real const> u_star_arr = (u_star_mf) ? u_star_mf->const_array(mfi) : Array4<Real const>{};
+        Array4<Real const> t_star_arr = (t_star_mf) ? t_star_mf->const_array(mfi) : Array4<Real const>{};
+        Array4<Real const> w_star_arr = (w_star_mf) ? w_star_mf->const_array(mfi) : Array4<Real const>{};
+
+        bool have_surface_params = (u_star_mf && t_star_mf && w_star_mf);
 
         ParallelFor(bxcc, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
         {
@@ -245,11 +274,22 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real N = (N_sq > zero) ? std::sqrt(N_sq) : zero;
 
             //==================================================================
-            // STEP 4: Estimate PBL height (simplified - TODO: use ERF_PBLHeight)
+            // STEP 4: Get PBL height and surface parameters
             //==================================================================
-            // For now, use a simple estimate. In production, should use
-            // ERF_PBLHeight utilities or get from SurfLayer interface
-            Real zi = amrex::Real(1000.0); // Typical CBL height, placeholder
+            // PBL height from hybrid theta-increase + TKE method (MYNNPBLH)
+            Real zi = pblh_arr(i, j, 0);
+            zi = amrex::max(zi, Real(10.0)); // Minimum 10m
+
+            // Surface layer parameters from MOST
+            Real u_star = Real(0.3);   // Default friction velocity [m/s]
+            Real t_star = Real(0.0);   // Default temperature scale [K]
+            Real w_star = Real(1.0);   // Default convective velocity [m/s]
+
+            if (have_surface_params) {
+                u_star = amrex::max(u_star_arr(i, j, 0), Real(1.0e-3));
+                t_star = t_star_arr(i, j, 0);
+                w_star = amrex::max(w_star_arr(i, j, 0), Real(1.0e-3));
+            }
 
             // Compute Δ/z_i ratio for partition functions
             Real Delta_over_zi = Delta_h / zi;
@@ -269,9 +309,9 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real L_S = SMS3DTKE_Length_Surface(z_agl, kappa, sms.alpha_s);
 
             // Integral length (Zhang et al. 2018, Eq. 30)
-            // TODO: Requires vertical integration of TKE profile
-            // For now, use approximation
-            Real L_T = sms.alpha_2 * zi; // Simplified
+            // Uses simplified form proportional to PBL height
+            // Full implementation would require column integration of TKE profile
+            Real L_T = SMS3DTKE_Length_Integral_Simple(E, zi, z_agl, sms.alpha_2);
 
             // Buoyancy length (Zhang et al. 2018, Eq. 31)
             Real alpha_k_meso = sms.c_k2; // Mesoscale mixing coefficient
@@ -337,9 +377,9 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real hfx_nonlocal = zero;
             if (sms.use_nonlocal_heat && P_NL > Real(1.0e-6)) {
                 // Zhang et al. 2018, Eq. 23-24
-                // TODO: Get surface flux and w* from SurfLayer
-                Real hfx_sfc = zero; // Placeholder: surface heat flux [K m/s]
-                Real w_star = amrex::Real(1.0); // Placeholder: convective velocity [m/s]
+                // Surface heat flux from MOST: H = -ρ C_p w'θ' ≈ ρ u* θ*
+                // For buoyancy flux in TKE equation: (ρ w'θ') / ρ = u* θ*
+                Real hfx_sfc = u_star * t_star; // [K m/s]
 
                 Real z_star = z_agl / zi;
                 hfx_nonlocal = P_NL * SMS3DTKE_Nonlocal_Heat_Profile(z_star, zi, w_star,
