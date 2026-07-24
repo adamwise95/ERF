@@ -54,6 +54,7 @@ ComputeTurbulentViscosityLES (amrex::Vector<std::unique_ptr<amrex::MultiFab>>& T
                               bool use_terrain_fitted_coords,
                               amrex::Vector<std::unique_ptr<amrex::MultiFab>>& mapfac,
                               const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
+                              const std::unique_ptr<amrex::MultiFab>& z_phys_cc,
                               const TurbChoice& turbChoice,
                               const amrex::Real const_grav,
                               std::unique_ptr<SurfaceLayer>& SurfLayer,

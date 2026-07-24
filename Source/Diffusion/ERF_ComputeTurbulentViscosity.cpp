@@ -23,6 +23,8 @@ using namespace amrex;
  * @param[in]  Diss dissipation of turbulent kinetic energy
  * @param[in]  geom problem geometry
  * @param[in]  mapfac map factors
+ * @param[in]  z_phys_nd physical height at cell nodes
+ * @param[in]  z_phys_cc physical height at cell centers
  * @param[in]  turbChoice container with turbulence parameters
  * @param[in]  xvel x-direction velocity (for moist Ri correction)
  * @param[in]  yvel y-direction velocity (for moist Ri correction)
@@ -33,8 +35,9 @@ void ComputeTurbulentViscosityLES (Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                                    const Geometry& geom, bool use_terrain_fitted_coords,
                                    Vector<std::unique_ptr<MultiFab>>& mapfac,
                                    const std::unique_ptr<MultiFab>& z_phys_nd,
+                                   const std::unique_ptr<MultiFab>& z_phys_cc,
                                    const TurbChoice& turbChoice, const Real const_grav,
-                                   std::unique_ptr<SurfaceLayer>& /*SurfLayer*/,
+                                   std::unique_ptr<SurfaceLayer>& SurfLayer,
                                    const MoistureComponentIndices& moisture_indices,
                                    const MultiFab* xvel,
                                    const MultiFab* yvel)
@@ -862,7 +865,7 @@ void ComputeTurbulentViscosity (double dt,
                                         cons_in, eddyViscosity,
                                         Hfx1, Hfx2, Hfx3, Diss,
                                         geom, use_terrain_fitted_coords,
-                                        mapfac, z_phys_nd, turbChoice, const_grav,
+                                        mapfac, z_phys_nd, z_phys_cc, turbChoice, const_grav,
                                         SurfLayer, solverChoice.moisture_indices,
                                         &xvel, &yvel);
         }

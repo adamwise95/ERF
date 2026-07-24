@@ -257,7 +257,6 @@ amrex::Real SMS3DTKE_Nonlocal_Heat_Profile(amrex::Real z_star,
         flux = flux_ML * (amrex::Real(1.0) - frac);
     } else {
         // Upper entrainment zone: continues to decrease
-        amrex::Real frac = (z_star - delta_EZ_hi) / (amrex::Real(1.0) - delta_EZ_hi);
         flux = amrex::Real(0.0); // Simplified: goes to zero at z_i
     }
 
@@ -268,7 +267,7 @@ amrex::Real SMS3DTKE_Nonlocal_Heat_Profile(amrex::Real z_star,
  * @brief Nonlocal momentum flux countergradient term γ_m
  *
  * Zhang et al. (2018), Eq. 27:
- *   γ_m = -S_m * (u*²/w*z_i) * (w*/u*)³
+ *   γ_m = -S_m * (u*²/w*z_i) * (w* / u*)³
  *
  * Only applied in vertical momentum equation.
  *

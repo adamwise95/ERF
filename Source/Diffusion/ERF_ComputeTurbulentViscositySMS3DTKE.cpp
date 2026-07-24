@@ -157,7 +157,7 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
     const Real l_inv_theta0 = (use_ref_theta) ? one / turbChoice.theta_ref : one;
 
     // von Kármán constant
-    const Real kappa = CONST_KARMAN;
+    const Real kappa = KAPPA;
 
     //==========================================================================
     // Compute PBL height using MYNN hybrid method
