@@ -31,6 +31,7 @@ ERF::write_1D_profiles (double time)
         Gpu::HostVector<Real> h_avg_p, h_avg_pu, h_avg_pv, h_avg_pw;
         Gpu::HostVector<Real> h_avg_tau11, h_avg_tau12, h_avg_tau13, h_avg_tau22, h_avg_tau23, h_avg_tau33;
         Gpu::HostVector<Real> h_avg_sgshfx, h_avg_sgsq1fx, h_avg_sgsq2fx, h_avg_sgsdiss; // only output tau_{theta,w} and epsilon for now
+        Gpu::HostVector<Real> h_avg_sgshfx_local, h_avg_sgshfx_nonlocal; // Local and nonlocal heat flux components (SMS-3DTKE)
 
         if (NumDataLogs() > 1) {
             derive_diag_profiles(time,
@@ -51,7 +52,8 @@ ERF::write_1D_profiles (double time)
             derive_stress_profiles(h_avg_tau11, h_avg_tau12, h_avg_tau13,
                                    h_avg_tau22, h_avg_tau23, h_avg_tau33,
                                    h_avg_sgshfx, h_avg_sgsq1fx, h_avg_sgsq2fx,
-                                   h_avg_sgsdiss);
+                                   h_avg_sgsdiss,
+                                   h_avg_sgshfx_local, h_avg_sgshfx_nonlocal);
         }
 
         int hu_size =  h_avg_u.size();
@@ -153,7 +155,8 @@ ERF::write_1D_profiles (double time)
                                 << h_avg_tau22[k]  << " " << h_avg_tau23[k] << " " << h_avg_tau33[k] << " "
                                 << h_avg_sgshfx[k] << " "
                                 << h_avg_sgsq1fx[k] << " " << h_avg_sgsq2fx[k] << " "
-                                << h_avg_sgsdiss[k]
+                                << h_avg_sgsdiss[k] << " "
+                                << h_avg_sgshfx_local[k] << " " << h_avg_sgshfx_nonlocal[k]
                                 << std::endl;
                   } // loop over z
                 } // if good
@@ -489,12 +492,13 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
                              Gpu::HostVector<Real>& h_avg_tau13, Gpu::HostVector<Real>& h_avg_tau22,
                              Gpu::HostVector<Real>& h_avg_tau23, Gpu::HostVector<Real>& h_avg_tau33,
                              Gpu::HostVector<Real>& h_avg_hfx3,  Gpu::HostVector<Real>& h_avg_q1fx3,
-                             Gpu::HostVector<Real>& h_avg_q2fx3, Gpu::HostVector<Real>& h_avg_diss)
+                             Gpu::HostVector<Real>& h_avg_q2fx3, Gpu::HostVector<Real>& h_avg_diss,
+                             Gpu::HostVector<Real>& h_avg_hfx3_local, Gpu::HostVector<Real>& h_avg_hfx3_nonlocal)
 {
     int lev = 0;
 
-    // This will hold the stress tensor components
-    MultiFab mf_out(grids[lev], dmap[lev], 10, 0);
+    // This will hold the stress tensor components + heat flux components
+    MultiFab mf_out(grids[lev], dmap[lev], 12, 0);  // Extended to 12 for local/nonlocal
 
     MultiFab mf_rho(vars_new[lev][Vars::cons], make_alias, 0, 1);
 
@@ -520,6 +524,8 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
         //const Array4<const Real>& hfx1_arr = SFS_hfx1_lev[lev]->const_array(mfi);
         //const Array4<const Real>& hfx2_arr = SFS_hfx2_lev[lev]->const_array(mfi);
         const Array4<const Real>& hfx3_arr = SFS_hfx3_lev[lev]->const_array(mfi);
+        const Array4<const Real>& hfx3_local_arr = SFS_hfx3_local_lev[lev]->const_array(mfi);
+        const Array4<const Real>& hfx3_nonlocal_arr = SFS_hfx3_nonlocal_lev[lev]->const_array(mfi);
         const Array4<const Real>& q1fx3_arr = (l_use_moist) ? SFS_q1fx3_lev[lev]->const_array(mfi) :
                                                               Array4<const Real>{};
         const Array4<const Real>& q2fx3_arr = (l_use_moist) ? SFS_q2fx3_lev[lev]->const_array(mfi) :
@@ -548,6 +554,9 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
             fab_arr(i, j, k, 7) = (l_use_moist) ? myhalf * ( q1fx3_arr(i,j,k) + q1fx3_arr(i,j,k+1) ) / rho_arr(i,j,k) : zero;
             fab_arr(i, j, k, 8) = (l_use_moist) ? myhalf * ( q2fx3_arr(i,j,k) + q2fx3_arr(i,j,k+1) ) / rho_arr(i,j,k) : zero;
             fab_arr(i, j, k, 9) =  diss_arr(i,j,k) / rho_arr(i,j,k);
+            fab_arr(i, j, k, 10) = myhalf * ( hfx3_local_arr(i,j,k) + hfx3_local_arr(i,j,k+1) ) / rho_arr(i,j,k);
+            fab_arr(i, j, k, 11) = myhalf * ( hfx3_nonlocal_arr(i,j,k) + hfx3_nonlocal_arr(i,j,k+1) ) / rho_arr(i,j,k);
+
         });
     }
 
@@ -564,6 +573,8 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
     h_avg_q1fx3 = sumToLine(mf_out,7,1,domain,zdir);
     h_avg_q2fx3 = sumToLine(mf_out,8,1,domain,zdir);
     h_avg_diss  = sumToLine(mf_out,9,1,domain,zdir);
+    h_avg_hfx3_local = sumToLine(mf_out,10,1,domain,zdir);
+    h_avg_hfx3_nonlocal = sumToLine(mf_out,11,1,domain,zdir);
 
     int ht_size =  h_avg_tau11.size();
 
@@ -580,6 +591,8 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
         h_avg_q1fx3[k] /= area_z;
         h_avg_q2fx3[k] /= area_z;
         h_avg_diss[k] /= area_z;
+        h_avg_hfx3_local[k] /= area_z;
+        h_avg_hfx3_nonlocal[k] /= area_z;
     }
 }
 

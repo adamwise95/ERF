@@ -281,6 +281,7 @@ ERF::ERF_shared ()
     Tau.resize(nlevs_max);
     Tau_corr.resize(nlevs_max);
     SFS_hfx1_lev.resize(nlevs_max);  SFS_hfx2_lev.resize(nlevs_max);  SFS_hfx3_lev.resize(nlevs_max);
+    SFS_hfx3_local_lev.resize(nlevs_max);  SFS_hfx3_nonlocal_lev.resize(nlevs_max);
     SFS_diss_lev.resize(nlevs_max);
     SFS_q1fx1_lev.resize(nlevs_max); SFS_q1fx2_lev.resize(nlevs_max); SFS_q1fx3_lev.resize(nlevs_max);
     SFS_q2fx3_lev.resize(nlevs_max);

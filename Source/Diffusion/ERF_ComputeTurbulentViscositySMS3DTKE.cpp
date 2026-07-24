@@ -132,7 +132,9 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                                    std::unique_ptr<SurfaceLayer>& SurfLayer,
                                    const MoistureComponentIndices& moisture_indices,
                                    const MultiFab* /*xvel*/,
-                                   const MultiFab* /*yvel*/)
+                                   const MultiFab* /*yvel*/,
+                                   MultiFab* Hfx3_local,
+                                   MultiFab* Hfx3_nonlocal)
 {
     // Get geometry information
     const GpuArray<Real, AMREX_SPACEDIM> cellSizeInv = geom.InvCellSizeArray();
@@ -283,6 +285,10 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
         const Array4<Real>& hfx_y = Hfx2.array(mfi);
         const Array4<Real>& hfx_z = Hfx3.array(mfi);
         const Array4<Real>& diss = Diss.array(mfi);
+
+        // Optional arrays for local/nonlocal decomposition
+        Array4<Real> hfx_z_local_arr = (Hfx3_local) ? Hfx3_local->array(mfi) : Array4<Real>{};
+        Array4<Real> hfx_z_nonlocal_arr = (Hfx3_nonlocal) ? Hfx3_nonlocal->array(mfi) : Array4<Real>{};
 
         const Array4<Real const>& cell_data = cons_in.array(mfi);
 
@@ -505,6 +511,14 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             hfx_x(i, j, k) = zero;
             hfx_y(i, j, k) = zero;
             hfx_z(i, j, k) = hfx_local + rho * hfx_nonlocal;
+
+            // Store components separately for validation (if requested)
+            if (hfx_z_local_arr) {
+                hfx_z_local_arr(i, j, k) = hfx_local;
+            }
+            if (hfx_z_nonlocal_arr) {
+                hfx_z_nonlocal_arr(i, j, k) = rho * hfx_nonlocal;
+            }
 
             //==================================================================
             // STEP 10: Compute scale-adaptive dissipation

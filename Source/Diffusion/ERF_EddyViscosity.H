@@ -40,7 +40,9 @@ ComputeTurbulentViscosity (double dt,
                            const amrex::BCRec* bc_ptr,
                            const eb_& ebfact,
                            bool vert_only = false,
-                           const amrex::MultiFab* qheating_rates = nullptr);
+                           const amrex::MultiFab* qheating_rates = nullptr,
+                           amrex::MultiFab* Hfx3_local = nullptr,
+                           amrex::MultiFab* Hfx3_nonlocal = nullptr);
 
 void
 ComputeTurbulentViscosityLES (amrex::Vector<std::unique_ptr<amrex::MultiFab>>& Tau_lev,
@@ -60,7 +62,9 @@ ComputeTurbulentViscosityLES (amrex::Vector<std::unique_ptr<amrex::MultiFab>>& T
                               std::unique_ptr<SurfaceLayer>& SurfLayer,
                               const MoistureComponentIndices& moisture_indices,
                               const amrex::MultiFab* xvel = nullptr,
-                              const amrex::MultiFab* yvel = nullptr);
+                              const amrex::MultiFab* yvel = nullptr,
+                              amrex::MultiFab* Hfx3_local = nullptr,
+                              amrex::MultiFab* Hfx3_nonlocal = nullptr);
 
 void
 ComputeTurbulentViscosityLES_EB (amrex::Vector<std::unique_ptr<amrex::MultiFab>>& Tau_lev,
@@ -102,7 +106,9 @@ ComputeTurbulentViscositySMS3DTKE (amrex::Vector<std::unique_ptr<amrex::MultiFab
                                    std::unique_ptr<SurfaceLayer>& SurfLayer,
                                    const MoistureComponentIndices& moisture_indices,
                                    const amrex::MultiFab* xvel = nullptr,
-                                   const amrex::MultiFab* yvel = nullptr);
+                                   const amrex::MultiFab* yvel = nullptr,
+                                   amrex::MultiFab* Hfx3_local = nullptr,
+                                   amrex::MultiFab* Hfx3_nonlocal = nullptr);
 
 AMREX_GPU_DEVICE
 AMREX_FORCE_INLINE

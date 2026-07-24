@@ -221,6 +221,8 @@ void ERF::advance_dycore (int level,
     MultiFab* Hfx1  = SFS_hfx1_lev[level].get();
     MultiFab* Hfx2  = SFS_hfx2_lev[level].get();
     MultiFab* Hfx3  = SFS_hfx3_lev[level].get();
+    MultiFab* Hfx3_local = SFS_hfx3_local_lev[level].get();  // Local (gradient) component
+    MultiFab* Hfx3_nonlocal = SFS_hfx3_nonlocal_lev[level].get();  // Nonlocal component (SMS-3DTKE)
     MultiFab* Q1fx1 = SFS_q1fx1_lev[level].get();
     MultiFab* Q1fx2 = SFS_q1fx2_lev[level].get();
     MultiFab* Q1fx3 = SFS_q1fx3_lev[level].get();
@@ -259,7 +261,8 @@ void ERF::advance_dycore (int level,
                                   bc_ptr_h,
                                   get_eb(level),
                                   false, // vert_only
-                                  qheating_rates[level].get());
+                                  qheating_rates[level].get(),
+                                  Hfx3_local, Hfx3_nonlocal);
     }
 
     // ***********************************************************************************************
