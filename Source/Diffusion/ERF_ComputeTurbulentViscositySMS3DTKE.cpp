@@ -79,14 +79,14 @@ Showed improved performance in gray zone (500m-3km resolutions)
 ============================================================================
 */
 
-#include "ERF_SurfaceLayer.H"
-#include "ERF_DirectionSelector.H"
 #include "ERF_Diffusion.H"
 #include "ERF_EddyViscosity.H"
+#include "ERF_TileNoZ.H"
 #include "ERF_Constants.H"
 #include "ERF_TurbStruct.H"
 #include "ERF_PBLModels.H"
-#include "ERF_TileNoZ.H"
+#include "ERF_SurfaceLayer.H"
+#include "ERF_DirectionSelector.H"
 #include "ERF_MoistUtils.H"
 #include "ERF_RichardsonNumber.H"
 #include "ERF_PBLHeight.H"
@@ -164,12 +164,15 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
     //==========================================================================
     // Compute PBL height using MYNN hybrid method
     //==========================================================================
-    MultiFab pblh_mf(cons_in.boxArray(), cons_in.DistributionMap(), 1, 1);
+    MultiFab pblh_mf(cons_in.boxArray(), cons_in.DistributionMap(), 1, cons_in.nGrowVect());
     pblh_mf.setVal(1000.0); // Default fallback value
 
     MYNNPBLH pblh_calc;
     pblh_calc.compute_pblh(geom, z_phys_cc.get(), &pblh_mf, cons_in,
                            nullptr, moisture_indices);
+
+    // GPU DEBUG: Sync after PBL height computation
+    Gpu::streamSynchronize();
 
     //==========================================================================
     // Compute integral length scale L_T via column integration
@@ -182,7 +185,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
     for (MFIter mfi(L_T_mf, TileNoZ()); mfi.isValid(); ++mfi)
     {
         const Box& domain_box = geom.Domain();
-        Box gtbx = mfi.growntilebox();
+        Box gtbx = mfi.tilebox();
+        gtbx.grow(1);  // Match the 1 ghost cell in L_T_mf
         gtbx.setSmall(2, domain_box.smallEnd(2));
         gtbx.setBig(2, domain_box.bigEnd(2));
 
@@ -234,6 +238,9 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             });
         }
     }
+
+    // GPU DEBUG: Sync after integral length scale accumulation
+    Gpu::streamSynchronize();
 
     // Finalize: L_T = α_2 * (numerator / denominator)
     for (MFIter mfi(L_T_mf); mfi.isValid(); ++mfi)
@@ -379,6 +386,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             //==================================================================
             // PBL height from hybrid theta-increase + TKE method (MYNNPBLH)
             Real zi = pblh_arr(i, j, 0);
+            // Protect against NaN/Inf from failed PBL height computation
+            if (!std::isfinite(zi)) zi = Real(1000.0);
             zi = amrex::max(zi, Real(10.0)); // Minimum 10m
 
             // Surface layer parameters from MOST
@@ -394,6 +403,7 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
 
             // Compute Δ/z_i ratio for partition functions
             Real Delta_over_zi = Delta_h / zi;
+            if (!std::isfinite(Delta_over_zi)) Delta_over_zi = one;
 
             //==================================================================
             // STEP 5: Compute partition functions
@@ -401,6 +411,11 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real P_L = SMS3DTKE_Partition_Local(Delta_over_zi);
             Real P_NL = (sms.use_nonlocal_heat) ? SMS3DTKE_Partition_Nonlocal(Delta_over_zi) : zero;
             Real P_TKE = SMS3DTKE_Partition_TKE(Delta_over_zi);
+
+            // Clamp partition functions to [0, 1]
+            P_L = amrex::max(0.0, amrex::min(P_L, 1.0));
+            P_NL = amrex::max(0.0, amrex::min(P_NL, 1.0));
+            P_TKE = amrex::max(0.0, amrex::min(P_TKE, 1.0));
 
             //==================================================================
             // STEP 6: Compute master mixing length components
@@ -412,6 +427,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             // Integral length (Zhang et al. 2018, Eq. 30)
             // From column integration: L_T = α_2 * ∫√e dz / ∫(1/√e) dz
             Real L_T = L_T_arr(i, j, 0);
+            // Protect against NaN/Inf from failed integral computation
+            if (!std::isfinite(L_T) || L_T <= zero) L_T = sms.alpha_2 * zi;
 
             // Buoyancy length (Zhang et al. 2018, Eq. 31)
             Real alpha_k_meso = sms.c_k2; // Mesoscale mixing coefficient
@@ -421,11 +438,15 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             // Minimum length (Zhang et al. 2018, Eq. 32)
             Real L_f = SMS3DTKE_Length_Minimum(E, N, sms.alpha_4);
 
-            // Mesoscale vertical mixing length (from MYNN-style)
-            Real l_Meso = L_T; // Simplified
-
             // Harmonic average (Zhang et al. 2018, Eq. 28)
-            Real l_v = SMS3DTKE_Harmonic_Length(l_Meso, L_S, L_T, L_B);
+            // This combines surface, integral, and buoyancy length scales
+            // Note: l_Meso is used as input but is actually L_T in the harmonic average
+            Real l_v = SMS3DTKE_Harmonic_Length(L_T, L_S, L_T, L_B);
+            if (!std::isfinite(l_v) || l_v <= zero) l_v = Delta;
+
+            // Mesoscale vertical mixing length (from MYNN-style harmonic average)
+            // Use the master length scale, not L_T directly
+            Real l_Meso = l_v;
 
             // LES mixing length (for scale-adaptive blending)
             Real l_LES = Delta;
@@ -435,9 +456,11 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                 l_LES = amrex::min(l_strat, Delta);
                 l_LES = amrex::max(l_LES, Real(0.001) * Delta);
             }
+            if (!std::isfinite(l_LES)) l_LES = Delta;
 
             // Scale-adaptive mixing length (Zhang et al. 2018, Eq. 37)
             Real L_Delta = P_L * l_Meso + (one - P_L) * l_LES;
+            if (!std::isfinite(L_Delta) || L_Delta <= zero) L_Delta = Delta;
 
             //==================================================================
             // STEP 7: Compute local eddy diffusivities
@@ -445,6 +468,12 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
 
             // Vertical eddy viscosity (Zhang et al. 2018, similar to Eq. 5)
             Real alpha_k = (one - P_L) * sms.c_k1 + P_L * sms.c_k2;
+
+            // Check all components are finite before multiplication
+            if (!std::isfinite(alpha_k)) alpha_k = sms.c_k1;
+            if (!std::isfinite(L_Delta) || L_Delta <= zero) L_Delta = Delta;
+            if (!std::isfinite(sqrt_E)) sqrt_E = zero;
+
             Real K_m_v = alpha_k * L_Delta * sqrt_E;
             Real K_h_v = K_m_v * inv_Pr_t;
 
@@ -477,12 +506,12 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                 K_h_h = K_m_h * inv_Pr_t;
             }
 
-            // Store eddy diffusivities
-            mu_turb(i, j, k, EddyDiff::Mom_v) = rho * K_m_v;
-            mu_turb(i, j, k, EddyDiff::Mom_h) = rho * K_m_h;
-            mu_turb(i, j, k, EddyDiff::Theta_v) = rho * K_h_v;
-            mu_turb(i, j, k, EddyDiff::Theta_h) = rho * K_h_h;
-            mu_turb(i, j, k, EddyDiff::Turb_lengthscale) = L_Delta;
+            // Store eddy diffusivities (with NaN/Inf protection)
+            mu_turb(i, j, k, EddyDiff::Mom_v) = std::isfinite(K_m_v) ? rho * K_m_v : zero;
+            mu_turb(i, j, k, EddyDiff::Mom_h) = std::isfinite(K_m_h) ? rho * K_m_h : zero;
+            mu_turb(i, j, k, EddyDiff::Theta_v) = std::isfinite(K_h_v) ? rho * K_h_v : zero;
+            mu_turb(i, j, k, EddyDiff::Theta_h) = std::isfinite(K_h_h) ? rho * K_h_h : zero;
+            mu_turb(i, j, k, EddyDiff::Turb_lengthscale) = std::isfinite(L_Delta) ? L_Delta : Delta;
 
             //==================================================================
             // STEP 8: Compute nonlocal heat flux
@@ -535,16 +564,30 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
             Real L_eps_Meso = c_eps2 * l_Meso;
             Real L_eps_Delta = P_TKE * L_eps_Meso + (one - P_TKE) * L_eps_LES;
 
-            // Dissipation rate: ε = e^(3/2) / L_ε,Δ
+            // Dissipation rate: ε = e^(3/2) / L_ε,Δ (with NaN/Inf protection)
             Real eps = std::numeric_limits<Real>::epsilon();
-            diss(i, j, k) = rho * std::pow(E, Real(1.5)) /
-                            amrex::max(L_eps_Delta, eps);
+            Real diss_val = rho * std::pow(E, Real(1.5)) / amrex::max(L_eps_Delta, eps);
+            diss(i, j, k) = std::isfinite(diss_val) ? diss_val : zero;
         });
     }
+
+    // GPU DEBUG: Sync after main kernel to catch any errors
+    Gpu::streamSynchronize();
 
     // Fill ghost cells after computing eddy viscosity
     // This is necessary because AddTKESources and other routines may access ghost cells
     eddyViscosity.FillBoundary(geom.periodicity());
     Hfx3.FillBoundary(geom.periodicity());
     Diss.FillBoundary(geom.periodicity());
+
+    // Copy PBL height to SurfaceLayer for diagnostics output
+    if (SurfLayer) {
+        MultiFab* pblh_out = SurfLayer->get_pblh(0);
+        if (pblh_out) {
+            MultiFab::Copy(*pblh_out, pblh_mf, 0, 0, 1, 0);
+        }
+    }
+
+    // GPU DEBUG: Sync after FillBoundary
+    Gpu::streamSynchronize();
 }

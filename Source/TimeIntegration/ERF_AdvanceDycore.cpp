@@ -212,6 +212,31 @@ void ERF::advance_dycore (int level,
                 }
             }
         } // mfi
+
+        // Fill SmnSmn if needed (for TKE models like Deardorff, SMS-3DTKE, kEqn RANS)
+        if (SmnSmn) {
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+            for (MFIter mfi(state_old[IntVars::cons], TileNoZ()); mfi.isValid(); ++mfi) {
+                const Box& bx = mfi.tilebox();
+                Array4<Real> SmnSmn_a = SmnSmn->array(mfi);
+                Array4<Real const> tau11 = Tau[level][TauType::tau11]->const_array(mfi);
+                Array4<Real const> tau22 = Tau[level][TauType::tau22]->const_array(mfi);
+                Array4<Real const> tau33 = Tau[level][TauType::tau33]->const_array(mfi);
+                Array4<Real const> tau12 = Tau[level][TauType::tau12]->const_array(mfi);
+                Array4<Real const> tau13 = Tau[level][TauType::tau13]->const_array(mfi);
+                Array4<Real const> tau23 = Tau[level][TauType::tau23]->const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    SmnSmn_a(i,j,k) = ComputeSmnSmn(i,j,k,
+                                                    tau11,tau22,tau33,
+                                                    tau12,tau13,tau23);
+                });
+            }
+        }
+
     } // l_use_diff
     } // profile
 

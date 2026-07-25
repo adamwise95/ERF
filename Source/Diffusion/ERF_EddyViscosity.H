@@ -134,7 +134,8 @@ ComputeSmnSmn (int& i, int& j, int& k,
     amrex::Real SmnSmn = s11bar*s11bar + s22bar*s22bar + s33bar*s33bar
                        + two*s12bar*s12bar + two*s13bar*s13bar + two*s23bar*s23bar;
 
-    return SmnSmn;
+    // Protect against NaN/Inf from bad tau values
+    return (std::isfinite(SmnSmn) && SmnSmn >= 0.0) ? SmnSmn : 0.0;
 }
 
 AMREX_GPU_DEVICE
@@ -228,7 +229,8 @@ ComputeSmnSmn_EB (int& i, int& j, int& k,
                + two*s12bar*s12bar + two*s13bar*s13bar + two*s23bar*s23bar;
     }
 
-    return SmnSmn;
+    // Protect against NaN/Inf from bad tau values
+    return (std::isfinite(SmnSmn) && SmnSmn >= 0.0) ? SmnSmn : 0.0;
 }
 
 AMREX_GPU_DEVICE
@@ -242,6 +244,8 @@ ComputeSmnSmn2D (int& i, int& j, int& k,
     amrex::Real sdiff = tau11(i,j,k) - tau22(i,j,k);
     amrex::Real s12bar = fourth * ( tau12(i  , j  , k  ) + tau12(i  , j+1, k  )
                                   + tau12(i+1, j  , k  ) + tau12(i+1, j+1, k  ) );
-    return myhalf * sdiff*sdiff + two*s12bar*s12bar;
+    amrex::Real SmnSmn = myhalf * sdiff*sdiff + two*s12bar*s12bar;
+    // Protect against NaN/Inf from bad tau values
+    return (std::isfinite(SmnSmn) && SmnSmn >= 0.0) ? SmnSmn : 0.0;
 }
 #endif
