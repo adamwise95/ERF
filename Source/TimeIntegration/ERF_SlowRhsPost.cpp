@@ -115,6 +115,7 @@ void erf_slow_rhs_post (int level, int finest_level,
 
     const bool l_use_KE         = ( tc.use_tke );
     const bool l_need_SmnSmn    = ( tc.les_type  == LESType::Deardorff ||
+                                    tc.les_type  == LESType::SMS3DTKE ||
                                     tc.rans_type == RANSType::kEqn );
     const bool l_advect_KE      = ( tc.use_tke && tc.advect_tke );
     const bool l_use_diff       = ((dc.molec_diff_type != MolecDiffType::None) ||
