@@ -209,8 +209,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                     Real dz = (k > 0) ? (z_cc(i, j, k) - z_cc(i, j, k-1)) : z_cc(i, j, 0);
 
                     // Accumulate integrals: numerator = ∫sqrt(e) dz, denominator = ∫1/sqrt(e) dz
-                    atomicAdd(&L_T_arr(i, j, 0), sqrt_e * dz);
-                    atomicAdd(&L_T_arr(i, j, 1), inv_sqrt_e * dz); // Need 2 components!
+                    Gpu::Atomic::Add(&L_T_arr(i, j, 0), sqrt_e * dz);
+                    Gpu::Atomic::Add(&L_T_arr(i, j, 1), inv_sqrt_e * dz); // Need 2 components!
                 }
             });
         } else {
@@ -228,8 +228,8 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                     Real sqrt_e = std::sqrt(e);
                     Real inv_sqrt_e = (e > Real(1.0e-6)) ? (one / sqrt_e) : Real(0.0);
 
-                    atomicAdd(&L_T_arr(i, j, 0), sqrt_e * dz);
-                    atomicAdd(&L_T_arr(i, j, 1), inv_sqrt_e * dz);
+                    Gpu::Atomic::Add(&L_T_arr(i, j, 0), sqrt_e * dz);
+                    Gpu::Atomic::Add(&L_T_arr(i, j, 1), inv_sqrt_e * dz);
                 }
             });
         }
@@ -541,4 +541,10 @@ ComputeTurbulentViscositySMS3DTKE(Vector<std::unique_ptr<MultiFab>>& Tau_lev,
                             amrex::max(L_eps_Delta, eps);
         });
     }
+
+    // Fill ghost cells after computing eddy viscosity
+    // This is necessary because AddTKESources and other routines may access ghost cells
+    eddyViscosity.FillBoundary(geom.periodicity());
+    Hfx3.FillBoundary(geom.periodicity());
+    Diss.FillBoundary(geom.periodicity());
 }
