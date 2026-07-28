@@ -590,26 +590,6 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // 5. Energy balance residual
                 Real residual = R_net - H - LE - G;
 
-                // Debug output for specific cells
-                if (k == 5 && j == 62 && (i == 56 || i == 72)) {
-                    const char* wall_type = roof_mask > 0.0 ? "ROOF" :
-                                           north_mask > 0.0 ? "NORTH" :
-                                           south_mask > 0.0 ? "SOUTH" :
-                                           east_mask > 0.0 ? "EAST" :
-                                           west_mask > 0.0 ? "WEST" : "UNKNOWN";
-                    amrex::Print() << "=== BSM Energy Balance Debug (i,j,k) = (" << i << "," << j << "," << k << ") ===" << std::endl;
-                    amrex::Print() << "  Wall type: " << wall_type << " | Shaded: " << (is_shaded ? "YES" : "NO") << std::endl;
-                    amrex::Print() << "  Iteration: " << iter << " | T_surf_new = " << T_surf_new << " K (" << (T_surf_new-273.15) << " C)" << std::endl;
-                    amrex::Print() << "  theta_cellaway = " << theta_cellaway << " K (" << (theta_cellaway-273.15) << " C)" << std::endl;
-                    amrex::Print() << "  T1_subsurface = " << T1_arr(i,j,k) << " K" << std::endl;
-                    amrex::Print() << "  Radiation: sw_dn = " << sw_dn << " W/m², lw_dn = " << lw_dn << " W/m²" << std::endl;
-                    amrex::Print() << "  R_net = " << R_net << " W/m² (net radiation INTO surface)" << std::endl;
-                    amrex::Print() << "  H = " << H << " W/m² (sensible heat AWAY from surface)" << std::endl;
-                    amrex::Print() << "  LE = " << LE << " W/m² (latent heat)" << std::endl;
-                    amrex::Print() << "  G = " << G << " W/m² (conduction into wall)" << std::endl;
-                    amrex::Print() << "  Residual = " << residual << " W/m²" << std::endl;
-                    amrex::Print() << "  u_tang = " << u_tang << " m/s, Ch = " << Ch << std::endl;
-                }
 
                 // 6. Derivative of residual w.r.t. T_surf
                 // d(residual)/dT = -4*emiss*sigma*T³ - rho*Cp*Ch*U - k/dz
@@ -633,6 +613,74 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             // Store converged surface temperature
             T_surf_arr(i,j,k) = T_surf_new;
         });
+
+        // Debug output AFTER ParallelFor completes (can't print inside GPU kernel)
+        // Check specific cells: k=5, j=62, i=56 (west) and i=72 (east)
+        for (int debug_i : {56, 72}) {
+            int i = debug_i;
+            int j = 62;
+            int k = 5;
+
+            if (bx.contains(IntVect(i,j,k))) {
+                // Read values from arrays
+                Real T_surf_final = T_surf_arr(i,j,k);
+                Real T1_sub = T1_arr(i,j,k);
+
+                // Get terrain blanking to identify wall type
+                Real t_blank = t_blank_arr(i,j,k);
+                Real t_blank_above = t_blank_arr(i,j,k+1);
+                Real t_blank_below = (k > 0) ? t_blank_arr(i,j,k-1) : 0.0;
+                Real t_blank_north = t_blank_arr(i,j+1,k);
+                Real t_blank_south = t_blank_arr(i,j-1,k);
+                Real t_blank_east  = t_blank_arr(i+1,j,k);
+                Real t_blank_west  = t_blank_arr(i-1,j,k);
+
+                // Identify wall type
+                bool is_roof  = (t_blank > 0.0 && t_blank < t_blank_below && t_blank_above == 0.0);
+                bool is_north = (t_blank > 0.0 && t_blank <= t_blank_south && t_blank_north == 0.0);
+                bool is_south = (t_blank > 0.0 && t_blank <= t_blank_north && t_blank_south == 0.0);
+                bool is_east  = (t_blank > 0.0 && t_blank <= t_blank_west  && t_blank_east == 0.0);
+                bool is_west  = (t_blank > 0.0 && t_blank <= t_blank_east  && t_blank_west == 0.0);
+
+                const char* wall_type = is_roof ? "ROOF" : is_north ? "NORTH" :
+                                       is_south ? "SOUTH" : is_east ? "EAST" :
+                                       is_west ? "WEST" : "NOT_A_WALL";
+
+                // Get adjacent cell temperature
+                Real theta_adj = 0.0;
+                if (is_roof && k+1 <= domain.bigEnd(2)) {
+                    theta_adj = cons_arr(i,j,k+1,RhoTheta_comp) / cons_arr(i,j,k+1,Rho_comp);
+                } else if (is_north) {
+                    theta_adj = cons_arr(i,j+1,k,RhoTheta_comp) / cons_arr(i,j+1,k,Rho_comp);
+                } else if (is_south) {
+                    theta_adj = cons_arr(i,j-1,k,RhoTheta_comp) / cons_arr(i,j-1,k,Rho_comp);
+                } else if (is_east) {
+                    theta_adj = cons_arr(i+1,j,k,RhoTheta_comp) / cons_arr(i+1,j,k,Rho_comp);
+                } else if (is_west) {
+                    theta_adj = cons_arr(i-1,j,k,RhoTheta_comp) / cons_arr(i-1,j,k,Rho_comp);
+                }
+
+                // Get radiation
+                Real sw = 0.0, lw = 0.0;
+                if (rad_arr) {
+                    sw = rad_arr(i,j,k,1);  // SW_dn
+                    lw = rad_arr(i,j,k,3);  // LW_dn
+                }
+
+                // Get shading
+                bool shaded = false;
+                if (shadow_arr) {
+                    shaded = (shadow_arr(i,j,k) > 0.0);
+                }
+
+                amrex::Print() << "\n=== BSM Debug (i,j,k) = (" << i << "," << j << "," << k << ") ===" << std::endl;
+                amrex::Print() << "  Wall type: " << wall_type << " | Shaded: " << (shaded ? "YES" : "NO") << std::endl;
+                amrex::Print() << "  T_surf = " << T_surf_final << " K (" << (T_surf_final-273.15) << " C)" << std::endl;
+                amrex::Print() << "  T_ambient = " << theta_adj << " K (" << (theta_adj-273.15) << " C)" << std::endl;
+                amrex::Print() << "  T_subsurface = " << T1_sub << " K (" << (T1_sub-273.15) << " C)" << std::endl;
+                amrex::Print() << "  SW_dn = " << sw << " W/m², LW_dn = " << lw << " W/m²" << std::endl;
+            }
+        }
     }
 
     } // End Pass 2 scope
