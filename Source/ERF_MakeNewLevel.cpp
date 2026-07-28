@@ -137,6 +137,9 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     if (solverChoice.building_surface_type != BuildingSurfaceType::None) {
         bsm.Define(lev, solverChoice);
         bsm.Init(lev, vars_new[lev][Vars::cons], Geom(lev), dt_mri_ratio[lev] * dt[0]);
+
+        // Get pointer to BSM surface temperature for use in MakeSources
+        building_surf_temp[lev] = bsm.Get_Data_Ptr(lev, "surf_temp");
     }
 
     // ********************************************************************************************
