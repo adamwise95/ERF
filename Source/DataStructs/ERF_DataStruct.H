@@ -85,6 +85,10 @@ AMREX_ENUM(LandSurfaceType,
     SLM, MM5, NOAHMP, OceanSurf, None
 );
 
+AMREX_ENUM(BuildingSurfaceType,
+    Simple, EnergyBalance, None
+);
+
 AMREX_ENUM(RadiationType,
     None, RRTMGP
 );
@@ -261,6 +265,17 @@ struct SolverChoice {
         // What type of land surface model to use
         lsm_type = LandSurfaceType::None; // Default
         pp.query_enum_case_insensitive("land_surface_model",lsm_type);
+
+        building_surface_type = BuildingSurfaceType::None; // Default
+        pp.query_enum_case_insensitive("building_surface_model",building_surface_type);
+        pp.query("bsm_albedo", bsm_albedo);
+        pp.query("bsm_emissivity", bsm_emissivity);
+        pp.query("bsm_moisture_avail", bsm_moisture_avail);
+        pp.query("bsm_cp_concrete", bsm_cp_concrete);
+        pp.query("bsm_k_concrete", bsm_k_concrete);
+        pp.query("bsm_nz_layers", bsm_nz_layers);
+        pp.query("bsm_dz_layer", bsm_dz_layer);
+        pp.query("bsm_deep_temp", bsm_deep_temp);
 
         read_int_string(max_level, "is_land", is_land, 1);
         for (int lev = 0; lev <= max_level; ++lev) {
@@ -1416,6 +1431,17 @@ struct SolverChoice {
     WindFarmType windfarm_type;
     WindFarmLocType windfarm_loc_type;
     LandSurfaceType lsm_type;
+    BuildingSurfaceType building_surface_type;
+
+    // Building surface model (BSM) material properties
+    amrex::Real bsm_albedo = 0.2;              // Surface albedo
+    amrex::Real bsm_emissivity = 0.9;          // Surface emissivity
+    amrex::Real bsm_moisture_avail = 0.0;      // Moisture availability (0-1)
+    amrex::Real bsm_cp_concrete = 2.0e6;       // Specific heat [J/m³K]
+    amrex::Real bsm_k_concrete = 1.5;          // Thermal conductivity [W/mK]
+    int         bsm_nz_layers = 4;             // Number of subsurface layers
+    amrex::Real bsm_dz_layer = 0.05;           // Layer thickness [m]
+    amrex::Real bsm_deep_temp = 300.0;         // Deep layer BC [K]
     RadiationType rad_type;
 
     ABLDriverType abl_driver_type;

@@ -59,6 +59,7 @@
 #include "ERF_EulerianMicrophysics.H"
 #include "ERF_LagrangianMicrophysics.H"
 #include "ERF_LandSurface.H"
+#include "ERF_BuildingSurface.H"
 
 #ifdef ERF_USE_WINDFARM
 #include "ERF_WindFarm.H"
@@ -456,6 +457,14 @@ public:
                       amrex::MultiFab& cons_in,
                       amrex::MultiFab& xvel_in,
                       amrex::MultiFab& yvel_in,
+                      const double& time,
+                      const double& dt_advance);
+
+    void advance_bsm (int lev,
+                      amrex::MultiFab& cons_in,
+                      amrex::MultiFab& xvel_in,
+                      amrex::MultiFab& yvel_in,
+                      amrex::MultiFab& zvel_in,
                       const double& time,
                       const double& dt_advance);
 
@@ -1069,6 +1078,11 @@ private:
 
     // Data structures for terrain immersed forcing
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> terrain_blanking;
+
+    // Building surface model
+    BuildingSurface bsm;
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> building_surf_temp;   // Surface temperature [K]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> building_subsurface;  // 4 components: subsurface layers [K]
 
     // Wall distance function
     amrex::Vector<std::unique_ptr<amrex::MultiFab>>  walldist;
