@@ -193,43 +193,43 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             });
         }
 
-        // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
-        {
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-            for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
+//         // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
+//         {
+// #ifdef _OPENMP
+// #pragma omp parallel if (Gpu::notInLaunchRegion())
+// #endif
+//             for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+//             {
+//                 const Box& bx = mfi.tilebox();
+//                 const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
 
-                // Create a copy for reading (to avoid race conditions)
-                MultiFab shadow_copy(T_surf.boxArray(), T_surf.DistributionMap(), 1, 1);
-                MultiFab::Copy(shadow_copy, *shadow_mask, 0, 0, 1, 1);
-                const Array4<const Real>& shadow_in = shadow_copy.const_array(mfi);
+//                 // Create a copy for reading (to avoid race conditions)
+//                 MultiFab shadow_copy(T_surf.boxArray(), T_surf.DistributionMap(), 1, 1);
+//                 MultiFab::Copy(shadow_copy, *shadow_mask, 0, 0, 1, 1);
+//                 const Array4<const Real>& shadow_in = shadow_copy.const_array(mfi);
 
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-                {
-                    // Only check shaded cells
-                    if (shadow_in(i,j,k) > 0.5) {
-                        // Check 4 orthogonal neighbors (within bounds)
-                        Real neighbor_sum = 0.0;
-                        int neighbor_count = 0;
+//                 ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+//                 {
+//                     // Only check shaded cells
+//                     if (shadow_in(i,j,k) > 0.5) {
+//                         // Check 4 orthogonal neighbors (within bounds)
+//                         Real neighbor_sum = 0.0;
+//                         int neighbor_count = 0;
 
-                        // Check each orthogonal neighbor
-                        if (bx.contains(IntVect(i-1,j,k))) { neighbor_sum += shadow_in(i-1,j,k); neighbor_count++; }
-                        if (bx.contains(IntVect(i+1,j,k))) { neighbor_sum += shadow_in(i+1,j,k); neighbor_count++; }
-                        if (bx.contains(IntVect(i,j-1,k))) { neighbor_sum += shadow_in(i,j-1,k); neighbor_count++; }
-                        if (bx.contains(IntVect(i,j+1,k))) { neighbor_sum += shadow_in(i,j+1,k); neighbor_count++; }
+//                         // Check each orthogonal neighbor
+//                         if (bx.contains(IntVect(i-1,j,k))) { neighbor_sum += shadow_in(i-1,j,k); neighbor_count++; }
+//                         if (bx.contains(IntVect(i+1,j,k))) { neighbor_sum += shadow_in(i+1,j,k); neighbor_count++; }
+//                         if (bx.contains(IntVect(i,j-1,k))) { neighbor_sum += shadow_in(i,j-1,k); neighbor_count++; }
+//                         if (bx.contains(IntVect(i,j+1,k))) { neighbor_sum += shadow_in(i,j+1,k); neighbor_count++; }
 
-                        // If all neighbors are unshadowed, this is likely a spurious detection
-                        if (neighbor_count >= 3 && neighbor_sum < 0.1) {
-                            shadow_arr(i,j,k) = 0.0;  // Unshade this cell
-                        }
-                    }
-                });
-            }
-        }
+//                         // If all neighbors are unshadowed, this is likely a spurious detection
+//                         if (neighbor_count >= 3 && neighbor_sum < 0.1) {
+//                             shadow_arr(i,j,k) = 0.0;  // Unshade this cell
+//                         }
+//                     }
+//                 });
+//             }
+//         }
     }
     } // End Pass 1 scope
 
