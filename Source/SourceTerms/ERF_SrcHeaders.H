@@ -81,6 +81,7 @@ void make_sources (int level, int nrk,
                    const amrex::MultiFab& yvel,
                    const amrex::MultiFab& zvel,
                    const amrex::MultiFab* qheating_rates,
+                   const amrex::MultiFab* rad_fluxes,
                    amrex::MultiFab* terrain_blank,
                    const amrex::Geometry geom,
                    const SolverChoice& solverChoice,
@@ -93,6 +94,7 @@ void make_sources (int level, int nrk,
                    const amrex::MultiFab* surface_state_at_lev,
                    InputSoundingData& input_sounding_data,
                    TurbulentPerturbation& turbPert,
+                   const amrex::MultiFab* bsm_surf_temp,
                    bool is_slow_step);
 
 #if defined(ERF_USE_NETCDF)
