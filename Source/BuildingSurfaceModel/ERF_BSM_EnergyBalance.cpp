@@ -590,6 +590,27 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // 5. Energy balance residual
                 Real residual = R_net - H - LE - G;
 
+                // Debug output for specific cells
+                if (k == 5 && j == 62 && (i == 56 || i == 72)) {
+                    const char* wall_type = roof_mask > 0.0 ? "ROOF" :
+                                           north_mask > 0.0 ? "NORTH" :
+                                           south_mask > 0.0 ? "SOUTH" :
+                                           east_mask > 0.0 ? "EAST" :
+                                           west_mask > 0.0 ? "WEST" : "UNKNOWN";
+                    amrex::Print() << "=== BSM Energy Balance Debug (i,j,k) = (" << i << "," << j << "," << k << ") ===" << std::endl;
+                    amrex::Print() << "  Wall type: " << wall_type << " | Shaded: " << (is_shaded ? "YES" : "NO") << std::endl;
+                    amrex::Print() << "  Iteration: " << iter << " | T_surf_new = " << T_surf_new << " K (" << (T_surf_new-273.15) << " C)" << std::endl;
+                    amrex::Print() << "  theta_cellaway = " << theta_cellaway << " K (" << (theta_cellaway-273.15) << " C)" << std::endl;
+                    amrex::Print() << "  T1_subsurface = " << T1_arr(i,j,k) << " K" << std::endl;
+                    amrex::Print() << "  Radiation: sw_dn = " << sw_dn << " W/m², lw_dn = " << lw_dn << " W/m²" << std::endl;
+                    amrex::Print() << "  R_net = " << R_net << " W/m² (net radiation INTO surface)" << std::endl;
+                    amrex::Print() << "  H = " << H << " W/m² (sensible heat AWAY from surface)" << std::endl;
+                    amrex::Print() << "  LE = " << LE << " W/m² (latent heat)" << std::endl;
+                    amrex::Print() << "  G = " << G << " W/m² (conduction into wall)" << std::endl;
+                    amrex::Print() << "  Residual = " << residual << " W/m²" << std::endl;
+                    amrex::Print() << "  u_tang = " << u_tang << " m/s, Ch = " << Ch << std::endl;
+                }
+
                 // 6. Derivative of residual w.r.t. T_surf
                 // d(residual)/dT = -4*emiss*sigma*T³ - rho*Cp*Ch*U - k/dz
                 Real d_lw_up_dT = 4.0 * emissivity * sigma * pow(T_surf_new, 3.0);
