@@ -51,8 +51,7 @@ BSM_Simple::Init (const int& lev,
         const Array4<Real>& T3_arr = m_vars[layer3_temp_idx]->array(mfi);
         const Array4<Real>& T4_arr = m_vars[layer4_temp_idx]->array(mfi);
 
-        const int Rho_comp = 0;
-        const int RhoTheta_comp = 1;
+        // Rho_comp and RhoTheta_comp are already defined in ERF_IndexDefines.H
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
