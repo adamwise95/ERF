@@ -234,13 +234,12 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
     // PASS 2: Compute energy balance for building surfaces using shadow mask
     // ========================================================================
 
-    // Physical constants
+    // Physical constants (min_t_blank already declared above)
     const Real sigma = 5.67e-8;        // Stefan-Boltzmann [W/m²K⁴]
     const Real Cp_d_val = Cp_d;        // Specific heat at constant pressure [J/kgK]
     const Real kappa = KAPPA;          // von Karman constant
     const Real z0 = 0.01;              // Roughness length [m] - should be configurable
     const Real max_iter = 5;           // Maximum Newton iterations
-    const Real min_t_blank = 1.e-4;    // Minimum terrain_blank threshold
 
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
