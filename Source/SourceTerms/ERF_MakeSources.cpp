@@ -639,6 +639,10 @@ void make_sources (int level,
             const Real surf_heating_rate  = solverChoice.if_surf_heating_rate; // Note this has been converted to K / s when it was read in;
             const Real Olen_in            = solverChoice.if_Olen_in;
 
+            // Extract BSM temperature array outside GPU kernel (if available)
+            const Array4<const Real> bsm_temp_arr = (bsm_surf_temp) ? bsm_surf_temp->const_array(mfi)
+                                                                     : Array4<const Real>{};
+
             ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
             {
                 Real t_blank       = t_blank_arr(i, j, k);
@@ -667,9 +671,8 @@ void make_sources (int level,
 
                 // SURFACE TEMP AND HEATING/COOLING RATE
                 Real surf_temp;
-                if (bsm_surf_temp != nullptr) {
+                if (bsm_temp_arr) {
                     // Use BSM-computed temperature from energy balance
-                    const Array4<const Real>& bsm_temp_arr = bsm_surf_temp->const_array(mfi);
                     surf_temp = bsm_temp_arr(i,j,k);
                     const Real bc_forcing_rt_srf = -(cell_data(i,j,k,Rho_comp) * surf_temp - cell_data(i,j,k,RhoTheta_comp));
                     cell_src(i, j, k, RhoTheta_comp) -= drag_coefficient * U_s * bc_forcing_rt_srf;
