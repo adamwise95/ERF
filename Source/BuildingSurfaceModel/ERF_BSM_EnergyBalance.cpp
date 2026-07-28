@@ -347,10 +347,48 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             // Skip energy balance if not a building surface
             if (!is_building_surface) return;
 
-            // Read shadow state from pre-computed shadow mask (Pass 1)
+            // Determine shading: geometric (fast) or raycast (accurate from Pass 1)
             bool is_shaded = false;
+
             if (shadow_arr) {
+                // Raycast mode: read pre-computed shadow mask from Pass 1
                 is_shaded = (shadow_arr(i,j,k) > 0.0);
+            } else {
+                // Geometric mode: simple orientation-based shading
+                // Roof: sunny if sun is above horizon
+                // Walls: shaded if sun is on opposite side
+                const Real PI = 3.14159265358979323846;
+                Real sun_az_rad = sun_az * (PI / 180.0);  // 0=N, 90=E, 180=S, 270=W
+                Real sun_zen_rad = sun_zen * (PI / 180.0);
+
+                // Sun below horizon → all shaded
+                if (sun_zen_rad > 85.0 * PI / 180.0) {
+                    is_shaded = true;
+                } else if (roof_mask > 0.0) {
+                    // Roof: always sunny if sun is up
+                    is_shaded = false;
+                } else {
+                    // Walls: check orientation vs sun azimuth
+                    // North wall (y+): shaded if sun from south (az ~180°)
+                    // South wall (y-): shaded if sun from north (az ~0° or 360°)
+                    // East wall (x+):  shaded if sun from west  (az ~270°)
+                    // West wall (x-):  shaded if sun from east  (az ~90°)
+
+                    if (north_mask > 0.0) {
+                        // North wall: shaded if sun azimuth 90° to 270° (east-south-west)
+                        is_shaded = (sun_az_rad > PI/2.0 && sun_az_rad < 3.0*PI/2.0);
+                    } else if (south_mask > 0.0) {
+                        // South wall: shaded if sun azimuth -90° to 90° (west-north-east)
+                        // Wrap: if az > 270° or az < 90°
+                        is_shaded = (sun_az_rad < PI/2.0 || sun_az_rad > 3.0*PI/2.0);
+                    } else if (east_mask > 0.0) {
+                        // East wall: shaded if sun azimuth 180° to 360° (south-west-north)
+                        is_shaded = (sun_az_rad > PI);
+                    } else if (west_mask > 0.0) {
+                        // West wall: shaded if sun azimuth 0° to 180° (north-east-south)
+                        is_shaded = (sun_az_rad < PI);
+                    }
+                }
             }
 
             // Select velocity components based on surface orientation
