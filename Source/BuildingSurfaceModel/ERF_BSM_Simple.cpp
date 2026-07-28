@@ -34,42 +34,18 @@ BSM_Simple::Init (const int& lev,
     m_vars[layer3_temp_idx] = std::make_unique<MultiFab>(ba, dm, 1, ngrow);
     m_vars[layer4_temp_idx] = std::make_unique<MultiFab>(ba, dm, 1, ngrow);
 
-    // Initialize temperatures based on atmospheric state
-    // Surface temp = ambient potential temperature
-    // Subsurface = ambient - 5K (cooler interior)
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-    for (MFIter mfi(*m_vars[surf_temp_idx], TilingIfNotGPU()); mfi.isValid(); ++mfi)
-    {
-        const Box& bx = mfi.tilebox();
+    // Initialize temperatures to reasonable defaults
+    // Energy balance solver will adjust surface temp on first timestep
+    // Surface: use typical ambient temperature (can be overridden via m_theta_dir input)
+    // Subsurface: 5K cooler to represent building interior
+    Real T_init_surface = m_theta_dir;  // Default 300K, or user-specified
+    Real T_init_subsurface = m_theta_dir - 5.0;
 
-        const Array4<const Real>& cons_arr = cons_in.const_array(mfi);
-        const Array4<Real>& T_surf_arr = m_vars[surf_temp_idx]->array(mfi);
-        const Array4<Real>& T1_arr = m_vars[layer1_temp_idx]->array(mfi);
-        const Array4<Real>& T2_arr = m_vars[layer2_temp_idx]->array(mfi);
-        const Array4<Real>& T3_arr = m_vars[layer3_temp_idx]->array(mfi);
-        const Array4<Real>& T4_arr = m_vars[layer4_temp_idx]->array(mfi);
-
-        // Rho_comp and RhoTheta_comp are already defined in ERF_IndexDefines.H
-
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-        {
-            // Get ambient potential temperature
-            Real rho = cons_arr(i,j,k,Rho_comp);
-            Real theta_amb = cons_arr(i,j,k,RhoTheta_comp) / rho;
-
-            // Surface starts at ambient
-            T_surf_arr(i,j,k) = theta_amb;
-
-            // Subsurface layers 5K cooler (building interior is cooler than outside)
-            Real T_sub = theta_amb - 5.0;
-            T1_arr(i,j,k) = T_sub;
-            T2_arr(i,j,k) = T_sub;
-            T3_arr(i,j,k) = T_sub;
-            T4_arr(i,j,k) = T_sub;
-        });
-    }
+    m_vars[surf_temp_idx]->setVal(T_init_surface);
+    m_vars[layer1_temp_idx]->setVal(T_init_subsurface);
+    m_vars[layer2_temp_idx]->setVal(T_init_subsurface);
+    m_vars[layer3_temp_idx]->setVal(T_init_subsurface);
+    m_vars[layer4_temp_idx]->setVal(T_init_subsurface);
 }
 
 /**
