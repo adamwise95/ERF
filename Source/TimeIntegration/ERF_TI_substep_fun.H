@@ -62,13 +62,16 @@ auto acoustic_substepping_fun = [&,one_d=one,zero_d=zero](int fast_step, int n_s
                      Svec_to_use, S_prim, cc_src, base_state[level], z_phys_cc[level].get(),
                      xvel_new, yvel_new, zvel_new,
                      qheating_rates[level].get(),
+                     (solverChoice.rad_type != RadiationType::None) ? rad_fluxes[level].get() : nullptr,
                      terrain_blank, fine_geom, solverChoice,
                      mapfac[level],
                      rhotheta_src[level].get(), rhoqt_src[level].get(),
                      dptr_wbar_sub, d_rayleigh_ptrs_at_lev,
                      d_sinesq_at_lev,
                      (solverChoice.hindcast_surface_bcs? &surface_state_interp[level] : nullptr),
-                     input_sounding_data, turbPert, false);
+                     input_sounding_data, turbPert,
+                     (solverChoice.building_surface_type != BuildingSurfaceType::None) ? building_surf_temp[level].get() : nullptr,
+                     false);
 
         // *************************************************************************
         // Set up flux registers if using two_way coupling
