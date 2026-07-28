@@ -63,6 +63,16 @@ public:
         return empty;
     }
 
+    // Get sun angles for shadow mask calculations
+    virtual
+    void
+    Get_Sun_Angles (amrex::Real& azimuth_deg, amrex::Real& zenith_deg) const
+    {
+        // Default implementation for non-RRTMGP models
+        azimuth_deg = 180.0;  // South
+        zenith_deg = 45.0;    // 45° from vertical
+    }
+
     void
     setupDataLog ()
     {
