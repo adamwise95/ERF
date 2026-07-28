@@ -70,7 +70,7 @@ auto acoustic_substepping_fun = [&,one_d=one,zero_d=zero](int fast_step, int n_s
                      d_sinesq_at_lev,
                      (solverChoice.hindcast_surface_bcs? &surface_state_interp[level] : nullptr),
                      input_sounding_data, turbPert,
-                     (solverChoice.building_surface_type != BuildingSurfaceType::None) ? building_surf_temp[level].get() : nullptr,
+                     (solverChoice.building_surface_type != BuildingSurfaceType::None) ? building_surf_temp[level] : nullptr,
                      false);
 
         // *************************************************************************
