@@ -364,7 +364,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 T_surf_new += delta_T;
 
                 // Check convergence
-                if (abs(delta_T) < 0.01) break;
+                if (amrex::Math::abs(delta_T) < 0.01) break;
             }
 
             // Store converged surface temperature
