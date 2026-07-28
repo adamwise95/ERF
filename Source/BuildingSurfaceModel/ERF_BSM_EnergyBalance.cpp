@@ -369,23 +369,23 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                     is_shaded = false;
                 } else {
                     // Walls: check orientation vs sun azimuth
-                    // North wall (y+): shaded if sun from south (az ~180°)
-                    // South wall (y-): shaded if sun from north (az ~0° or 360°)
-                    // East wall (x+):  shaded if sun from west  (az ~270°)
-                    // West wall (x-):  shaded if sun from east  (az ~90°)
+                    // A wall is SUNNY if sun is on the same side as wall faces
+                    // North wall (y+): sunny if sun from north (az 270-360-90°), shaded if from south
+                    // South wall (y-): sunny if sun from south (az 90-180-270°), shaded if from north
+                    // East wall (x+):  sunny if sun from east  (az 0-90-180°), shaded if from west
+                    // West wall (x-):  sunny if sun from west  (az 180-270-360°), shaded if from east
 
                     if (north_mask > 0.0) {
-                        // North wall: shaded if sun azimuth 90° to 270° (east-south-west)
+                        // North wall: shaded if sun from south (az 90-270°)
                         is_shaded = (sun_az_rad > PI/2.0 && sun_az_rad < 3.0*PI/2.0);
                     } else if (south_mask > 0.0) {
-                        // South wall: shaded if sun azimuth -90° to 90° (west-north-east)
-                        // Wrap: if az > 270° or az < 90°
+                        // South wall: shaded if sun from north (az 270-360° or 0-90°)
                         is_shaded = (sun_az_rad < PI/2.0 || sun_az_rad > 3.0*PI/2.0);
                     } else if (east_mask > 0.0) {
-                        // East wall: shaded if sun azimuth 180° to 360° (south-west-north)
+                        // East wall: shaded if sun from west (az > 180°, i.e., 180-270-360°)
                         is_shaded = (sun_az_rad > PI);
                     } else if (west_mask > 0.0) {
-                        // West wall: shaded if sun azimuth 0° to 180° (north-east-south)
+                        // West wall: shaded if sun from east (az < 180°, i.e., 0-90-180°)
                         is_shaded = (sun_az_rad < PI);
                     }
                 }

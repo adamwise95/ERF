@@ -47,20 +47,24 @@ void ERF::advance_bsm (int lev,
         }
         // Geometric mode: no shadow mask needed (computed inline in energy balance)
 
-        // Get sun angles for shadow mask (only needed when updating shadow)
+        // Get sun angles
         double sun_azimuth_deg = 180.0;   // Default: South
         double sun_zenith_deg = 45.0;      // Default: 45° from vertical
 
-        if (update_shadow && solverChoice.rad_type != RadiationType::None && rad[lev]) {
+        if (solverChoice.rad_type != RadiationType::None && rad[lev]) {
             Real az, zen;
             rad[lev]->Get_Sun_Angles(az, zen);
             sun_azimuth_deg = az;
             sun_zenith_deg = zen;
-            amrex::Print() << "BSM: Updating shadow mask at step " << istep[lev]
-                          << " - Azimuth: " << sun_azimuth_deg
-                          << "° (0=N, 90=E, 180=S, 270=W), Zenith: " << sun_zenith_deg
-                          << "° (0=overhead, 90=horizon)" << std::endl;
         }
+
+        // Always print sun angles (helps debug geometric shading)
+        if (update_shadow) {
+            amrex::Print() << "BSM: Updating shadow mask (Raycast) at step " << istep[lev] << std::endl;
+        }
+        amrex::Print() << "BSM: Sun angles - Azimuth: " << sun_azimuth_deg
+                      << "° (0=N, 90=E, 180=S, 270=W), Zenith: " << sun_zenith_deg
+                      << "° (0=overhead, 90=horizon)" << std::endl;
 
         // Grid spacing array for stretched/terrain-following coordinates
         GpuArray<Real,3> dx_arr = {geom[lev].CellSize(0),
