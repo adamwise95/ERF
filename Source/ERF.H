@@ -1292,6 +1292,8 @@ private:
                                                     "rel_humidity", "condensation_rate",
                                                     // Terrain IB mask
                                                     "terrain_IB_mask",
+                                                    // Building shadow mask
+                                                    "shadow_mask",
                                                     // EB variables
                                                     "volfrac"
 #ifdef ERF_COMPUTE_ERROR

@@ -101,7 +101,8 @@ ERF::setPlotVariables (const std::string& pp_plot_var_names, Vector<std::string>
                 derived_names[i] == "SMark1";
             if (is_windfarm_name) continue;
             bool ok_to_add = ( (solverChoice.terrain_type == TerrainType::ImmersedForcing || solverChoice.buildings_type == BuildingsType::ImmersedForcing ) ||
-                               (derived_names[i] != "terrain_IB_mask") );
+                               (derived_names[i] != "terrain_IB_mask") &&
+                               (derived_names[i] != "shadow_mask") );
             ok_to_add     &= ( (SolverChoice::terrain_type == TerrainType::StaticFittedMesh) ||
                                (SolverChoice::terrain_type == TerrainType::MovingFittedMesh) ||
                                (derived_names[i] != "detJ") );
@@ -1409,6 +1410,17 @@ ERF::Write3DPlotFile (int which, PlotFileType plotfile_type, Vector<std::string>
         {
             MultiFab* terrain_blank = terrain_blanking[lev].get();
             MultiFab::Copy(mf[lev],*terrain_blank,0,mf_comp,1,0);
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "shadow_mask"))
+        {
+            if (building_shadow_mask[lev]) {
+                MultiFab::Copy(mf[lev],*building_shadow_mask[lev],0,mf_comp,1,0);
+            } else {
+                // Fill with zeros if shadow mask not allocated
+                mf[lev].setVal(0.0, mf_comp, 1, 0);
+            }
             mf_comp ++;
         }
 

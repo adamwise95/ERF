@@ -93,7 +93,8 @@ ERF::setSubVolVariables (const std::string& pp_subvol_var_names,
     for (int i = 0; i < derived_subvol_names.size(); ++i) {
         if ( containerHasElement(subvol_var_names, derived_names[i]) ) {
             bool ok_to_add = ( (solverChoice.terrain_type == TerrainType::ImmersedForcing) ||
-                               (derived_names[i] != "terrain_IB_mask") );
+                               (derived_names[i] != "terrain_IB_mask") &&
+                               (derived_names[i] != "shadow_mask") );
             ok_to_add     &= ( (SolverChoice::terrain_type == TerrainType::StaticFittedMesh) ||
                                (SolverChoice::terrain_type == TerrainType::MovingFittedMesh) ||
                                (derived_names[i] != "detJ") );
