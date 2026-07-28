@@ -123,6 +123,21 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     }
 
     // ********************************************************************************************
+    // Initialize building surface model if enabled
+    // ********************************************************************************************
+    if (lev == 0) {
+        if (solverChoice.building_surface_type == BuildingSurfaceType::Simple) {
+            bsm.ReSize(finest_level+1);
+            bsm.SetModel<BSM_Simple>();
+        }
+        // EnergyBalance model will be added in Phase 3
+    }
+    if (solverChoice.building_surface_type != BuildingSurfaceType::None) {
+        bsm.Define(lev, solverChoice);
+        bsm.Init(lev, vars_new[lev][Vars::cons], Geom(lev), dt_mri_ratio[lev] * dt[0]);
+    }
+
+    // ********************************************************************************************
     // Build the data structures for calculating diffusive/turbulent terms
     // ********************************************************************************************
     update_diffusive_arrays(lev, ba, dm);

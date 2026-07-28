@@ -7,6 +7,7 @@
 #include <AMReX_MultiFabUtil.H>
 
 #include <ERF_BuildingSurfBase.H>
+#include <ERF_BSM_Simple.H>
 
 /**
  * @brief Wrapper class for building surface models

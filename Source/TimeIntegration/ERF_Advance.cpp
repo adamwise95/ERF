@@ -325,6 +325,13 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     double time_at_end_of_step = time+dt_lev;
     advance_lsm(lev, S_new, U_new, V_new, time_at_end_of_step, dt_lev);
 
+    // **************************************************************************************
+    // Update the building surface model
+    // **************************************************************************************
+    if (solverChoice.building_surface_type != BuildingSurfaceType::None) {
+        advance_bsm(lev, S_new, U_new, V_new, W_new, time_at_end_of_step, dt_lev);
+    }
+
 #ifdef ERF_USE_PARTICLES
     // **************************************************************************************
     // Update the particle positions
