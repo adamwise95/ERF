@@ -208,26 +208,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             }
             u_tang = amrex::max(u_tang, 0.1);  // Minimum wind speed
 
-            // Get radiation at the height of this building surface cell
-            // Only read SW_dn and LW_dn (atmospheric/solar inputs)
-            // Note: SW_up = albedo * SW_dn (accounted for in R_net calculation)
-            //       LW_up = f(T_surf) (recomputed in Newton iteration below)
-            Real sw_dn = 0.0;
-            Real lw_dn = 0.0;
-            if (has_radiation) {
-                // Radiation fluxes: component 0=SW_up, 1=SW_dn, 2=LW_up, 3=LW_dn
-                // Use radiation at height k (buildings are resolved in height)
-                sw_dn = rad_arr(i,j,k,1);
-                lw_dn = rad_arr(i,j,k,3);
-
-                // Apply shadow: zero SW_dn if shaded
-                // Note: This zeros ALL SW (direct + diffuse)
-                // Could be refined to only zero direct component
-                if (is_shaded) {
-                    sw_dn = 0.0;
-                }
-            }
-
+            // Compute shadow FIRST (before using is_shaded)
             if (compute_shadow && has_radiation) {
                 const Real PI = 3.14159265358979323846;
                 Real zen_rad = sun_zen * (PI / 180.0);
@@ -315,6 +296,26 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             // Get atmospheric state
             Real rho = cons_arr(i,j,k,Rho_comp);
             Real theta = cons_arr(i,j,k,RhoTheta_comp) / rho;
+
+            // Get radiation at the height of this building surface cell
+            // Only read SW_dn and LW_dn (atmospheric/solar inputs)
+            // Note: SW_up = albedo * SW_dn (accounted for in R_net calculation)
+            //       LW_up = f(T_surf) (recomputed in Newton iteration below)
+            Real sw_dn = 0.0;
+            Real lw_dn = 0.0;
+            if (has_radiation) {
+                // Radiation fluxes: component 0=SW_up, 1=SW_dn, 2=LW_up, 3=LW_dn
+                // Use radiation at height k (buildings are resolved in height)
+                sw_dn = rad_arr(i,j,k,1);
+                lw_dn = rad_arr(i,j,k,3);
+
+                // Apply shadow: zero SW_dn if shaded (NOW is_shaded is computed!)
+                // Note: This zeros ALL SW (direct + diffuse)
+                // Could be refined to only zero direct component
+                if (is_shaded) {
+                    sw_dn = 0.0;
+                }
+            }
 
             // Get cell vertical spacing for MOST reference height
             Real dz_cell;
