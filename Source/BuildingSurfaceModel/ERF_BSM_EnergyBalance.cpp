@@ -89,9 +89,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
         const Array4<const Real>& t_blank_arr = (terrain_blank) ? terrain_blank->const_array(mfi)
                                                                 : Array4<const Real>{};
 
-        // Radiation fluxes at surface (k=0 in rad_fluxes corresponds to surface)
+        // Radiation fluxes (SW_up, SW_dn, LW_up, LW_dn at each k level)
         const Array4<const Real>& rad_arr = (rad_fluxes) ? rad_fluxes->const_array(mfi)
                                                          : Array4<const Real>{};
+        const bool has_radiation = (rad_fluxes != nullptr);
 
         const Real albedo = m_albedo;
         const Real emissivity = m_emissivity;
@@ -178,9 +179,12 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             u_tang = amrex::max(u_tang, 0.1);  // Minimum wind speed
 
             // Get radiation at the height of this building surface cell
+            // Only read SW_dn and LW_dn (atmospheric/solar inputs)
+            // Note: SW_up = albedo * SW_dn (accounted for in R_net calculation)
+            //       LW_up = f(T_surf) (recomputed in Newton iteration below)
             Real sw_dn = 0.0;
             Real lw_dn = 0.0;
-            if (rad_arr) {
+            if (has_radiation) {
                 // Radiation fluxes: component 0=SW_up, 1=SW_dn, 2=LW_up, 3=LW_dn
                 // Use radiation at height k (buildings are resolved in height)
                 sw_dn = rad_arr(i,j,k,1);
