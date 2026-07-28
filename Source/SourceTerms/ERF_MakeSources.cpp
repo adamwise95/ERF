@@ -687,12 +687,16 @@ void make_sources (int level,
                 Real theta_neighbor       = cell_data(i,j,k+1,RhoTheta_comp) / cell_data(i,j,k+1,Rho_comp);
 
                 // SURFACE TEMP AND HEATING/COOLING RATE
+                // Check if this is a building surface cell
+                bool is_building_surface = (roof_mask > 0.0 || south_mask > 0.0 || north_mask > 0.0 ||
+                                            east_mask > 0.0 || west_mask > 0.0);
+
                 Real surf_temp;
-                if (bsm_temp_arr) {
-                    // Use BSM-computed temperature from energy balance
+                if (bsm_temp_arr && is_building_surface) {
+                    // Use BSM-computed temperature from energy balance (only at wall/roof cells)
                     surf_temp = bsm_temp_arr(i,j,k);
                     const Real bc_forcing_rt_srf = -(cell_data(i,j,k,Rho_comp) * surf_temp - cell_data(i,j,k,RhoTheta_comp));
-                    cell_src(i, j, k, RhoTheta_comp) -= (south_mask + north_mask + east_mask + west_mask + roof_mask) * drag_coefficient * U_s * bc_forcing_rt_srf;
+                    cell_src(i, j, k, RhoTheta_comp) -= drag_coefficient * U_s * bc_forcing_rt_srf;
                 }
                 
                 if (init_surf_temp > zero) {
