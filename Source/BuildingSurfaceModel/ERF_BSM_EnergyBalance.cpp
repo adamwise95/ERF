@@ -177,14 +177,14 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             }
             u_tang = amrex::max(u_tang, 0.1);  // Minimum wind speed
 
-            // Get radiation at surface
+            // Get radiation at the height of this building surface cell
             Real sw_dn = 0.0;
             Real lw_dn = 0.0;
             if (rad_arr) {
                 // Radiation fluxes: component 0=SW_up, 1=SW_dn, 2=LW_up, 3=LW_dn
-                // At surface k=0
-                sw_dn = rad_arr(i,j,0,1);
-                lw_dn = rad_arr(i,j,0,3);
+                // Use radiation at height k (buildings are resolved in height)
+                sw_dn = rad_arr(i,j,k,1);
+                lw_dn = rad_arr(i,j,k,3);
             }
 
             // Simple shadow mask: check if there's a building above this cell
