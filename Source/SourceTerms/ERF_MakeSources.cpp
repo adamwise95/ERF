@@ -652,12 +652,29 @@ void make_sources (int level,
                 Real t_blank_south  = t_blank_arr(i  , j-1, k);
                 Real t_blank_east   = t_blank_arr(i+1, j  , k);
                 Real t_blank_west   = t_blank_arr(i-1, j  , k);
+
                 if (t_blank < min_t_blank) { t_blank = zero; } // deal with situations where very small volfrac exist
                 if (t_blank_below < min_t_blank) { t_blank_below = zero; }
                 if (t_blank_north < min_t_blank) { t_blank_north = zero; }
                 if (t_blank_south < min_t_blank) { t_blank_south = zero; }
                 if (t_blank_east < min_t_blank) { t_blank_east = zero; }
                 if (t_blank_west < min_t_blank) { t_blank_west = zero; }
+            
+                // Round to avoid issues with very small volfracs
+                t_blank = std::round(t_blank * 10000.0) / 10000.0;
+                t_blank_below = std::round(t_blank_below * 10000.0) / 10000.0;
+                t_blank_above = std::round(t_blank_above * 10000.0) / 10000.0;
+                t_blank_north = std::round(t_blank_north * 10000.0) / 10000.0;
+                t_blank_south = std::round(t_blank_south * 10000.0) / 10000.0;
+                t_blank_east = std::round(t_blank_east * 10000.0) / 10000.0;
+                t_blank_west = std::round(t_blank_west * 10000.0) / 10000.0;
+
+                // Identify surface type (same logic as ERF_MakeMomSources.cpp)
+                Real roof_mask  = (t_blank > 0.0 && t_blank < t_blank_below && t_blank_above == 0.0) ? 1.0 : 0.0;
+                Real south_mask = (t_blank > 0.0 && t_blank <= t_blank_north && t_blank_south == 0.0) ? 1.0 : 0.0;
+                Real north_mask = (t_blank > 0.0 && t_blank <= t_blank_south && t_blank_north == 0.0) ? 1.0 : 0.0;
+                Real east_mask  = (t_blank > 0.0 && t_blank <= t_blank_west  && t_blank_east == 0.0) ? 1.0 : 0.0;
+                Real west_mask  = (t_blank > 0.0 && t_blank <= t_blank_east  && t_blank_west == 0.0) ? 1.0 : 0.0;
 
                 const Real dx_z = (z_cc_arr) ? (z_cc_arr(i,j,k) - z_cc_arr(i,j,k-1)) : dx_arr[2];
                 Real drag_coefficient = alpha_h / std::pow(dx_x*dx_y*dx_z, one/three);
@@ -675,7 +692,7 @@ void make_sources (int level,
                     // Use BSM-computed temperature from energy balance
                     surf_temp = bsm_temp_arr(i,j,k);
                     const Real bc_forcing_rt_srf = -(cell_data(i,j,k,Rho_comp) * surf_temp - cell_data(i,j,k,RhoTheta_comp));
-                    cell_src(i, j, k, RhoTheta_comp) -= drag_coefficient * U_s * bc_forcing_rt_srf;
+                    cell_src(i, j, k, RhoTheta_comp) -= (south_mask + north_mask + east_mask + west_mask + roof_mask) * drag_coefficient * U_s * bc_forcing_rt_srf;
                 }
                 
                 if (init_surf_temp > zero) {
