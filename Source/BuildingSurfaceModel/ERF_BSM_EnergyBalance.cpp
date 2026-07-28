@@ -392,28 +392,45 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             }
 
             // Select velocity components based on surface orientation
-            // Roof: u and v (horizontal velocities)
-            // North/South walls: u and w (tangential to y-normal wall)
-            // East/West walls: v and w (tangential to x-normal wall)
+            // Extract velocities from ADJACENT FLUID CELL (same as theta_cellaway)
+            // Roof: u and v (horizontal velocities) from cell above (k+1)
+            // North wall: u and w from cell to north (j+1)
+            // South wall: u and w from cell to south (j-1)
+            // East wall: v and w from cell to east (i+1)
+            // West wall: v and w from cell to west (i-1)
             Real u1, u2, u_tang;
             if (roof_mask > 0.0) {
-                // Roof: horizontal wind speed from u,v
-                Real ux = 0.5 * (u_arr(i,j,k) + u_arr(i+1,j,k));
-                Real uy = 0.5 * (v_arr(i,j,k) + v_arr(i,j+1,k));
+                // Roof: horizontal wind speed from cell above (k+1)
+                Real ux = 0.5 * (u_arr(i,j,k+1) + u_arr(i+1,j,k+1));
+                Real uy = 0.5 * (v_arr(i,j,k+1) + v_arr(i,j+1,k+1));
                 u1 = ux;
                 u2 = uy;
                 u_tang = sqrt(u1*u1 + u2*u2);
-            } else if (south_mask > 0.0 || north_mask > 0.0) {
-                // North/South walls: u and w
-                Real ux = 0.5 * (u_arr(i,j,k) + u_arr(i+1,j,k));
-                Real uz = 0.5 * (w_arr(i,j,k) + w_arr(i,j,k+1));
+            } else if (south_mask > 0.0) {
+                // South wall: u and w from cell to south (j-1)
+                Real ux = 0.5 * (u_arr(i,j-1,k) + u_arr(i+1,j-1,k));
+                Real uz = 0.5 * (w_arr(i,j-1,k) + w_arr(i,j-1,k+1));
                 u1 = ux;
                 u2 = uz;
                 u_tang = sqrt(u1*u1 + u2*u2);
-            } else if (east_mask > 0.0 || west_mask > 0.0) {
-                // East/West walls: v and w
-                Real uy = 0.5 * (v_arr(i,j,k) + v_arr(i,j+1,k));
-                Real uz = 0.5 * (w_arr(i,j,k) + w_arr(i,j,k+1));
+            } else if (north_mask > 0.0) {
+                // North wall: u and w from cell to north (j+1)
+                Real ux = 0.5 * (u_arr(i,j+1,k) + u_arr(i+1,j+1,k));
+                Real uz = 0.5 * (w_arr(i,j+1,k) + w_arr(i,j+1,k+1));
+                u1 = ux;
+                u2 = uz;
+                u_tang = sqrt(u1*u1 + u2*u2);
+            } else if (east_mask > 0.0) {
+                // East wall: v and w from cell to east (i+1)
+                Real uy = 0.5 * (v_arr(i+1,j,k) + v_arr(i+1,j+1,k));
+                Real uz = 0.5 * (w_arr(i+1,j,k) + w_arr(i+1,j,k+1));
+                u1 = uy;
+                u2 = uz;
+                u_tang = sqrt(u1*u1 + u2*u2);
+            } else if (west_mask > 0.0) {
+                // West wall: v and w from cell to west (i-1)
+                Real uy = 0.5 * (v_arr(i-1,j,k) + v_arr(i-1,j+1,k));
+                Real uz = 0.5 * (w_arr(i-1,j,k) + w_arr(i-1,j,k+1));
                 u1 = uy;
                 u2 = uz;
                 u_tang = sqrt(u1*u1 + u2*u2);
