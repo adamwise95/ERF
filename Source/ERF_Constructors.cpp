@@ -90,6 +90,7 @@ ERF::ERF_shared ()
 
     qheating_rates.resize(nlevs_max);
     rad_fluxes.resize(nlevs_max);
+    building_shadow_mask.resize(nlevs_max);
 
     // NOTE: size lsm before readparams (chooses the model at all levels)
     lsm.ReSize(nlevs_max);
