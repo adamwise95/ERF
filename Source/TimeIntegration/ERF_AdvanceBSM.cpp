@@ -37,6 +37,9 @@ void ERF::advance_bsm (int lev,
             rad[lev]->Get_Sun_Angles(az, zen);
             sun_azimuth_deg = az;
             sun_zenith_deg = zen;
+            amrex::Print() << "BSM: Sun angles - Azimuth: " << sun_azimuth_deg
+                          << "° (0=N, 90=E, 180=S, 270=W), Zenith: " << sun_zenith_deg
+                          << "° (0=overhead, 90=horizon)" << std::endl;
         }
 
         // Grid spacing array for stretched/terrain-following coordinates
