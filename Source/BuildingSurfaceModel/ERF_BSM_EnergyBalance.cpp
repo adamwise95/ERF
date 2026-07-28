@@ -614,15 +614,18 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                                            south_mask > 0.0 ? "SOUTH" :
                                            east_mask > 0.0 ? "EAST" :
                                            west_mask > 0.0 ? "WEST" : "UNKNOWN";
+                    Real lw_up = emissivity * sigma * pow(T_surf_new, 4.0);
                     printf("=== BSM Debug (i,j,k)=(%d,%d,%d) Wall=%s Shaded=%s ===\n",
                            i, j, k, wall_type, is_shaded ? "YES" : "NO");
                     printf("  Iter %d: T_surf=%.2f K (%.2f C), T_ambient=%.2f K (%.2f C)\n",
                            iter, T_surf_new, T_surf_new-273.15, theta_cellaway, theta_cellaway-273.15);
-                    printf("  T_subsurface=%.2f K, sw_dn=%.1f W/m2, lw_dn=%.1f W/m2\n",
+                    printf("  T1_layer=%.2f K, sw_dn=%.1f W/m2, lw_dn=%.1f W/m2\n",
                            T1_arr(i,j,k), sw_dn, lw_dn);
                     printf("  R_net=%.1f, H=%.1f, LE=%.1f, G=%.1f, Residual=%.1f W/m2\n",
                            R_net, H, LE, G, residual);
                     printf("  u_tang=%.2f m/s, Ch=%.6f\n", u_tang, Ch);
+                    printf("  DEBUG: lw_up=%.1f, albedo=%.2f, emiss=%.2f, dz_sub=%.3fm, k=%.2f\n",
+                           lw_up, albedo, emissivity, dz_subsurface, k_concrete);
                 }
 
                 // 6. Derivative of residual w.r.t. T_surf
