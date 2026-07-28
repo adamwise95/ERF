@@ -27,10 +27,38 @@ void ERF::advance_bsm (int lev,
                        const double& dt_advance)
 {
     if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance) {
-        // TODO: Get actual sun angles from radiation module
-        // For now, use placeholder values (overhead sun from south)
-        double sun_azimuth_deg = 180.0;  // South
-        double sun_zenith_deg = 30.0;    // 30° from vertical
+        // Get sun angles for shadow mask
+        // If radiation is enabled, extract from radiation module
+        double sun_azimuth_deg = 180.0;   // Default: South
+        double sun_zenith_deg = 45.0;      // Default: 45° from vertical
+
+        if (solverChoice.rad_type != RadiationType::None && rad[lev]) {
+            // TODO: Add Get_Sun_Angles() method to Radiation class
+            // For now, use time-of-day approximation
+            // This is a simplified calculation - full implementation would use
+            // orbital_cos_zenith and azimuth calculation like WRF
+
+            // Simple time-of-day estimate (placeholder)
+            // Assumes: solar noon at time=12h local, sun moves 15°/hour
+            double hour = fmod(time / 3600.0, 24.0);  // Convert seconds to hours
+            double hour_angle = (hour - 12.0) * 15.0;  // -180° to +180°
+
+            // Very rough zenith estimate (minimum at noon)
+            sun_zenith_deg = 30.0 + 30.0 * std::abs(hour - 12.0) / 6.0;
+            sun_zenith_deg = std::min(sun_zenith_deg, 85.0);  // Cap at grazing
+
+            // Azimuth: 0°=North, 90°=East, 180°=South, 270°=West
+            // Sun moves East->South->West
+            if (hour < 6.0) {
+                sun_azimuth_deg = 90.0;  // East (sunrise)
+            } else if (hour < 12.0) {
+                sun_azimuth_deg = 90.0 + 90.0 * (hour - 6.0) / 6.0;  // E->S
+            } else if (hour < 18.0) {
+                sun_azimuth_deg = 180.0 + 90.0 * (hour - 12.0) / 6.0;  // S->W
+            } else {
+                sun_azimuth_deg = 270.0;  // West (sunset)
+            }
+        }
 
         // Grid spacing array for stretched/terrain-following coordinates
         GpuArray<Real,3> dx_arr = {geom[lev].CellSize(0),
