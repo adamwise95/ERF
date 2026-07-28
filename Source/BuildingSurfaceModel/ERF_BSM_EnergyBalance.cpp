@@ -608,7 +608,8 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 Real residual = R_net - H - LE - G;
 
                 // Debug output for specific cells (inside kernel, use printf)
-                if (k == 5 && j == 62 && (i == 56 || i == 71) && iter == 0) {
+                if (k == 5 && j == 62 && (i == 56 || i == 71) && iter <= 1) {
+                    printf("Iter: %i \n", iter);
                     const char* wall_type = roof_mask > 0.0 ? "ROOF" :
                                            north_mask > 0.0 ? "NORTH" :
                                            south_mask > 0.0 ? "SOUTH" :
