@@ -27,20 +27,25 @@ void ERF::advance_bsm (int lev,
                        const double& dt_advance)
 {
     if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance) {
-        // Check if we need to update shadow mask (expensive ray-casting)
+        // Check if we need to update shadow mask (only for Raycast mode)
         bool update_shadow = false;
-        int shadow_freq = solverChoice.shadow_freq_in_steps;
 
-        if (shadow_freq > 0) {
-            // Update shadow mask every shadow_freq steps
-            update_shadow = ( (istep[lev] == 0) ||
-                             (istep[lev] % shadow_freq == 0) ||
-                             (shadow_last_updated[lev] < 0) );
+        if (solverChoice.shadow_type == ShadowType::Raycast) {
+            // Raycast mode: expensive ray-casting, update periodically
+            int shadow_freq = solverChoice.shadow_freq_in_steps;
 
-            if (update_shadow) {
-                shadow_last_updated[lev] = istep[lev];
+            if (shadow_freq > 0) {
+                // Update shadow mask every shadow_freq steps
+                update_shadow = ( (istep[lev] == 0) ||
+                                 (istep[lev] % shadow_freq == 0) ||
+                                 (shadow_last_updated[lev] < 0) );
+
+                if (update_shadow) {
+                    shadow_last_updated[lev] = istep[lev];
+                }
             }
         }
+        // Geometric mode: no shadow mask needed (computed inline in energy balance)
 
         // Get sun angles for shadow mask (only needed when updating shadow)
         double sun_azimuth_deg = 180.0;   // Default: South
