@@ -590,6 +590,23 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // 5. Energy balance residual
                 Real residual = R_net - H - LE - G;
 
+                // Debug output for specific cells (inside kernel, use printf)
+                if (k == 5 && j == 62 && (i == 56 || i == 72) && iter == 0) {
+                    const char* wall_type = roof_mask > 0.0 ? "ROOF" :
+                                           north_mask > 0.0 ? "NORTH" :
+                                           south_mask > 0.0 ? "SOUTH" :
+                                           east_mask > 0.0 ? "EAST" :
+                                           west_mask > 0.0 ? "WEST" : "UNKNOWN";
+                    printf("=== BSM Debug (i,j,k)=(%d,%d,%d) Wall=%s Shaded=%s ===\n",
+                           i, j, k, wall_type, is_shaded ? "YES" : "NO");
+                    printf("  Iter %d: T_surf=%.2f K (%.2f C), T_ambient=%.2f K (%.2f C)\n",
+                           iter, T_surf_new, T_surf_new-273.15, theta_cellaway, theta_cellaway-273.15);
+                    printf("  T_subsurface=%.2f K, sw_dn=%.1f W/m2, lw_dn=%.1f W/m2\n",
+                           T1_arr(i,j,k), sw_dn, lw_dn);
+                    printf("  R_net=%.1f, H=%.1f, LE=%.1f, G=%.1f, Residual=%.1f W/m2\n",
+                           R_net, H, LE, G, residual);
+                    printf("  u_tang=%.2f m/s, Ch=%.6f\n", u_tang, Ch);
+                }
 
                 // 6. Derivative of residual w.r.t. T_surf
                 // d(residual)/dT = -4*emiss*sigma*T³ - rho*Cp*Ch*U - k/dz
