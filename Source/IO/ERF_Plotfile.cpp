@@ -1424,6 +1424,17 @@ ERF::Write3DPlotFile (int which, PlotFileType plotfile_type, Vector<std::string>
             mf_comp ++;
         }
 
+        if (containerHasElement(plot_var_names, "building_surf_temp"))
+        {
+            if (building_surf_temp[lev]) {
+                MultiFab::Copy(mf[lev],*building_surf_temp[lev],0,mf_comp,1,0);
+            } else {
+                // Fill with zeros if BSM not active
+                mf[lev].setVal(0.0, mf_comp, 1, 0);
+            }
+            mf_comp ++;
+        }
+
         if (containerHasElement(plot_var_names, "volfrac")) {
             if ( solverChoice.terrain_type == TerrainType::EB ||
                  solverChoice.terrain_type == TerrainType::ImmersedForcing)
