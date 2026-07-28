@@ -211,45 +211,64 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 lw_dn = rad_arr(i,j,k,3);
             }
 
-            // 3D ray marching shadow mask following sun direction
-            // Cast ray from surface toward sun to check if blocked by buildings
+            // Shadow mask via horizon angle method (WRF-style)
+            // Scan surrounding cells in sun direction to find max elevation angle
+            // If any neighbor blocks the sun path, this cell is shaded
             bool is_shaded = false;
             if (compute_shadow && has_radiation) {
-                // Shadow falls opposite to sun direction
                 const Real PI = 3.14159265358979323846;
-                Real shadow_az = fmod(sun_az + 180.0, 360.0);
-                Real theta = shadow_az * (PI / 180.0);
                 Real zen_rad = sun_zen * (PI / 180.0);
-                Real tan_zen = tan(zen_rad);
 
-                // Ray step sizes (i,j per k level)
-                Real di = sin(theta) * tan_zen;
-                Real dj = cos(theta) * tan_zen;
+                // Skip if sun is too low (below horizon or grazing)
+                if (zen_rad > 80.0 * PI / 180.0) {
+                    is_shaded = true;  // Sun too low
+                } else {
+                    // Shadow azimuth (opposite of sun)
+                    Real shadow_az = fmod(sun_az + 180.0, 360.0);
+                    Real theta = shadow_az * (PI / 180.0);
 
-                // Ray march toward sun (opposite of shadow direction)
-                // Start from this cell and march upward
-                const int max_steps = 50;
-                for (int step = 1; step < max_steps; ++step) {
-                    // March toward sun (upward and horizontally)
-                    Real ray_i = Real(i) - step * di;
-                    Real ray_j = Real(j) - step * dj;
-                    int ray_k = k + step;
+                    // Max shadow length in cells (like WRF's gpshad)
+                    // Use 25000m / cell_size as max search distance
+                    const int max_shadow_cells = 50;  // Reasonable for urban scales
 
-                    // Round to nearest cell
-                    int ii = int(round(ray_i));
-                    int jj = int(round(ray_j));
+                    // Get this cell's height (top of building surface)
+                    Real cell_height = Real(k) * dz;
 
-                    // Check if ray escaped domain vertically
-                    if (ray_k > k_max) break;
+                    // Scan in shadow direction (opposite of sun)
+                    Real tan_zen = tan(zen_rad);
+                    for (int step = 1; step <= max_shadow_cells; ++step) {
+                        // Step in shadow direction (horizontal)
+                        Real scan_i = Real(i) + step * sin(theta);
+                        Real scan_j = Real(j) + step * cos(theta);
 
-                    // Check bounds (horizontally, periodic or wall BC)
-                    if (!bx.contains(IntVect(ii, jj, ray_k))) break;
+                        int ii = int(round(scan_i));
+                        int jj = int(round(scan_j));
 
-                    // Check if ray hit solid building
-                    Real t_ray = t_blank_arr(ii, jj, ray_k);
-                    if (t_ray > 0.5) {
-                        is_shaded = true;
-                        break;
+                        // Check horizontal bounds
+                        if (!bx.contains(IntVect(ii, jj, k))) break;
+
+                        // Distance from this cell
+                        Real dist_horiz = sqrt((ii-i)*(ii-i) + (jj-j)*(jj-j)) * dz;
+
+                        // Scan vertically at this (i,j) location
+                        // Find highest solid cell (building top)
+                        Real neighbor_height = 0.0;
+                        for (int kk = 0; kk <= k_max; ++kk) {
+                            Real t_neighbor = t_blank_arr(ii, jj, kk);
+                            if (t_neighbor > 0.5) {
+                                neighbor_height = Real(kk+1) * dz;  // Top of solid cell
+                            }
+                        }
+
+                        // Check if this neighbor blocks sun
+                        // Elevation angle from this cell to neighbor top
+                        Real elev_angle = atan((neighbor_height - cell_height) / dist_horiz);
+                        Real sun_elev = PI/2.0 - zen_rad;  // Sun elevation above horizon
+
+                        if (elev_angle > sun_elev) {
+                            is_shaded = true;
+                            break;
+                        }
                     }
                 }
             }
