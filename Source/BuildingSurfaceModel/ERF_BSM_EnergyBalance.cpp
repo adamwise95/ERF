@@ -119,76 +119,83 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                     return;
                 }
 
-                bool is_shaded = false;
+                // ================================================================
+                // Solar shading via ray-casting toward sun
+                // ================================================================
                 const Real PI = 3.14159265358979323846;
-                Real zen_rad = sun_zen * (PI / 180.0);
 
-                // Skip if sun is too low (below horizon or grazing)
-                if (zen_rad > 80.0 * PI / 180.0) {
-                    is_shaded = true;  // Sun too low
+                // Convert sun angles: zenith → altitude (angle above horizon)
+                Real sun_zenith_rad = sun_zen * (PI / 180.0);
+                Real sun_altitude = PI/2.0 - sun_zenith_rad;  // [0, π/2]
+                Real sun_azimuth = sun_az * (PI / 180.0);     // [0, 2π]
+
+                // Sun below horizon → fully shaded
+                if (sun_altitude < 0.0 || sun_zenith_rad > 85.0 * PI / 180.0) {
+                    shadow_arr(i,j,k) = 1.0;
+                    return;
+                }
+
+                // Get this cell's height
+                Real z_cell;
+                if (z_cc_arr) {
+                    z_cell = z_cc_arr(i,j,k);
                 } else {
-                    // Scan TOWARD the sun to check if anything blocks the sun path
-                    Real theta = sun_az * (PI / 180.0);  // Sun direction
+                    z_cell = (Real(k) + 0.5) * dx_arr[2];
+                }
 
-                    // Max scan distance
-                    const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
-                    const int max_scan_cells = amrex::min(50, int(25000.0 / dx_horiz));
+                // Ray-cast toward sun: check if buildings block the sun path
+                Real tan_alt = tan(sun_altitude);  // Rise/run for sun rays
 
-                    // Get this cell's physical height
-                    Real cell_height;
-                    if (z_cc_arr) {
-                        cell_height = z_cc_arr(i,j,k);
-                    } else {
-                        cell_height = (Real(k) + 0.5) * dx_arr[2];
-                    }
+                // Maximum horizontal distance to check (like WRF: 25 km or 50 cells)
+                const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
+                const Real max_dist = amrex::min(25000.0, 50.0 * dx_horiz);
 
-                    // Scan toward the sun to check for blocking buildings
-                    Real tan_zen = tan(zen_rad);
-                    for (int step = 1; step <= max_scan_cells; ++step) {
-                        // Step toward sun (horizontal)
-                        Real scan_i = Real(i) + step * sin(theta);
-                        Real scan_j = Real(j) + step * cos(theta);
+                // Number of ray steps to check
+                const int n_steps = 10;
 
-                        int ii = int(round(scan_i));
-                        int jj = int(round(scan_j));
+                bool is_shaded = false;
+                for (int step = 1; step <= n_steps; ++step) {
+                    Real frac = Real(step) / Real(n_steps);
+                    Real dist = frac * max_dist;
 
-                        // Check horizontal bounds
-                        if (!bx.contains(IntVect(ii, jj, k))) break;
+                    // Horizontal position along ray toward sun
+                    Real x_ray = dist * sin(sun_azimuth);  // North = 0°, East = 90°
+                    Real y_ray = dist * cos(sun_azimuth);
 
-                        // Horizontal distance from this cell
-                        Real di = Real(ii - i) * dx_arr[0];
-                        Real dj = Real(jj - j) * dx_arr[1];
-                        Real dist_horiz = sqrt(di*di + dj*dj);
+                    // Grid indices at this ray position
+                    int i_ray = i + int(round(x_ray / dx_arr[0]));
+                    int j_ray = j + int(round(y_ray / dx_arr[1]));
 
-                        // Scan vertically at this (i,j) location
-                        // Find highest solid cell (building top)
-                        Real neighbor_height = 0.0;
-                        for (int kk = 0; kk <= k_max; ++kk) {
-                            Real t_neighbor = t_blank_arr(ii, jj, kk);
-                            if (t_neighbor > 0.5) {
-                                // Get physical height of top of this cell
-                                if (z_cc_arr) {
-                                    Real dz_cell = (kk > 0) ? (z_cc_arr(ii,jj,kk) - z_cc_arr(ii,jj,kk-1))
-                                                            : dx_arr[2];
-                                    neighbor_height = z_cc_arr(ii,jj,kk) + 0.5*dz_cell;
-                                } else {
-                                    neighbor_height = Real(kk+1) * dx_arr[2];
-                                }
+                    // Check bounds
+                    if (!bx.contains(IntVect(i_ray, j_ray, k))) continue;
+
+                    // Height of sun ray at this horizontal distance
+                    Real z_sun_ray = z_cell + dist * tan_alt;
+
+                    // Find highest building at this (i_ray, j_ray) location
+                    Real z_building_top = 0.0;
+                    for (int kk = 0; kk <= k_max; ++kk) {
+                        Real t_neighbor = t_blank_arr(i_ray, j_ray, kk);
+                        if (t_neighbor > 0.5) {
+                            // Building cell - get its top elevation
+                            if (z_cc_arr) {
+                                Real dz_cell = (kk > 0) ? (z_cc_arr(i_ray,j_ray,kk) - z_cc_arr(i_ray,j_ray,kk-1))
+                                                        : dx_arr[2];
+                                z_building_top = z_cc_arr(i_ray,j_ray,kk) + 0.5*dz_cell;
+                            } else {
+                                z_building_top = Real(kk+1) * dx_arr[2];
                             }
                         }
+                    }
 
-                        // Check if this neighbor blocks sun
-                        Real elev_angle = atan((neighbor_height - cell_height) / dist_horiz);
-                        Real sun_elev = PI/2.0 - zen_rad;
-
-                        if (elev_angle > sun_elev) {
-                            is_shaded = true;
-                            break;
-                        }
+                    // If building is higher than sun ray, it blocks the sun
+                    if (z_building_top > z_sun_ray) {
+                        is_shaded = true;
+                        break;  // No need to check further
                     }
                 }
 
-                // Store shadow mask
+                // Store binary shadow mask
                 shadow_arr(i,j,k) = is_shaded ? 1.0 : 0.0;
             });
         }
