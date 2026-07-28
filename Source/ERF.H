@@ -1084,6 +1084,7 @@ private:
     amrex::Vector<amrex::MultiFab*> building_surf_temp;   // Surface temperature [K] (pointer to BSM data)
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> building_subsurface;  // 4 components: subsurface layers [K]
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> building_shadow_mask;  // 1=shaded, 0=sunlit
+    amrex::Vector<int> shadow_last_updated;  // Step when shadow was last computed (per level)
 
     // Wall distance function
     amrex::Vector<std::unique_ptr<amrex::MultiFab>>  walldist;

@@ -27,17 +27,32 @@ void ERF::advance_bsm (int lev,
                        const double& dt_advance)
 {
     if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance) {
-        // Get sun angles for shadow mask
+        // Check if we need to update shadow mask (expensive ray-casting)
+        bool update_shadow = false;
+        int shadow_freq = solverChoice.shadow_freq_in_steps;
+
+        if (shadow_freq > 0) {
+            // Update shadow mask every shadow_freq steps
+            update_shadow = ( (istep[lev] == 0) ||
+                             (istep[lev] % shadow_freq == 0) ||
+                             (shadow_last_updated[lev] < 0) );
+
+            if (update_shadow) {
+                shadow_last_updated[lev] = istep[lev];
+            }
+        }
+
+        // Get sun angles for shadow mask (only needed when updating shadow)
         double sun_azimuth_deg = 180.0;   // Default: South
         double sun_zenith_deg = 45.0;      // Default: 45° from vertical
 
-        // Extract actual sun angles from RRTMGP radiation if available
-        if (solverChoice.rad_type != RadiationType::None && rad[lev]) {
+        if (update_shadow && solverChoice.rad_type != RadiationType::None && rad[lev]) {
             Real az, zen;
             rad[lev]->Get_Sun_Angles(az, zen);
             sun_azimuth_deg = az;
             sun_zenith_deg = zen;
-            amrex::Print() << "BSM: Sun angles - Azimuth: " << sun_azimuth_deg
+            amrex::Print() << "BSM: Updating shadow mask at step " << istep[lev]
+                          << " - Azimuth: " << sun_azimuth_deg
                           << "° (0=N, 90=E, 180=S, 270=W), Zenith: " << sun_zenith_deg
                           << "° (0=overhead, 90=horizon)" << std::endl;
         }
@@ -48,11 +63,12 @@ void ERF::advance_bsm (int lev,
                                    geom[lev].CellSize(2)};
 
         // Full energy balance model with state coupling
+        // Pass shadow_mask only if we're updating it this step
         bsm.Advance(lev, cons_in, xvel_in, yvel_in, zvel_in,
                     rad_fluxes[lev].get(),
                     terrain_blanking[lev].get(),
                     z_phys_cc[lev].get(),
-                    building_shadow_mask[lev].get(),
+                    update_shadow ? building_shadow_mask[lev].get() : nullptr,
                     dx_arr,
                     sun_azimuth_deg,
                     sun_zenith_deg,

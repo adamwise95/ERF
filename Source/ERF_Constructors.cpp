@@ -92,6 +92,7 @@ ERF::ERF_shared ()
     rad_fluxes.resize(nlevs_max);
     building_shadow_mask.resize(nlevs_max);
     building_surf_temp.resize(nlevs_max);
+    shadow_last_updated.resize(nlevs_max, -999);  // Initialize to invalid step
 
     // NOTE: size lsm before readparams (chooses the model at all levels)
     lsm.ReSize(nlevs_max);

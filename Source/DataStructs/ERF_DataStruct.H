@@ -276,6 +276,7 @@ struct SolverChoice {
         pp.query("bsm_nz_layers", bsm_nz_layers);
         pp.query("bsm_dz_layer", bsm_dz_layer);
         pp.query("bsm_deep_temp", bsm_deep_temp);
+        pp.query("shadow_freq_in_steps", shadow_freq_in_steps);
 
         read_int_string(max_level, "is_land", is_land, 1);
         for (int lev = 0; lev <= max_level; ++lev) {
@@ -1442,6 +1443,7 @@ struct SolverChoice {
     int         bsm_nz_layers = 4;             // Number of subsurface layers
     amrex::Real bsm_dz_layer = 0.05;           // Layer thickness [m]
     amrex::Real bsm_deep_temp = 300.0;         // Deep layer BC [K]
+    int         shadow_freq_in_steps = 10;     // Update shadow mask every N steps (expensive ray-casting)
     RadiationType rad_type;
 
     ABLDriverType abl_driver_type;

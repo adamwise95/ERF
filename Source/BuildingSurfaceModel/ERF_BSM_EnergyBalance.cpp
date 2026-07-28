@@ -148,11 +148,11 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
 
                 // Maximum horizontal distance to check (like WRF: 25 km or 50 cells)
                 const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
-                const Real max_dist = amrex::min(25000.0, 50.0 * dx_horiz);
+                const Real max_dist = amrex::min(25000.0, 250.0 * dx_horiz);
 
                 // Number of steps: sample approximately every grid cell to avoid missing buildings
                 // Use at least 50 steps, or enough to sample every dx_horiz
-                const int n_steps = amrex::max(50, int(max_dist / dx_horiz));
+                const int n_steps = amrex::max(250, int(max_dist / dx_horiz));
 
                 bool is_shaded = false;
                 for (int step = 1; step <= n_steps; ++step) {
