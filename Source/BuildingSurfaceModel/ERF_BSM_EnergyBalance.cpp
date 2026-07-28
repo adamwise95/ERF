@@ -231,14 +231,14 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 if (zen_rad > 80.0 * PI / 180.0) {
                     is_shaded = true;  // Sun too low
                 } else {
-                    // Shadow azimuth (opposite of sun)
-                    Real shadow_az = fmod(sun_az + 180.0, 360.0);
-                    Real theta = shadow_az * (PI / 180.0);
+                    // Scan TOWARD the sun to check if anything blocks the sun path
+                    // (NOT away from sun - that's backwards!)
+                    Real theta = sun_az * (PI / 180.0);  // Sun direction
 
-                    // Max shadow length (like WRF's gpshad)
+                    // Max scan distance (like WRF's gpshad)
                     // Use max 25000m / cell_size, or cap at 50 cells for efficiency
                     const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
-                    const int max_shadow_cells = amrex::min(50, int(25000.0 / dx_horiz));
+                    const int max_scan_cells = amrex::min(50, int(25000.0 / dx_horiz));
 
                     // Get this cell's physical height (use z_cc if available)
                     Real cell_height;
@@ -249,10 +249,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                         cell_height = (Real(k) + 0.5) * dx_arr[2];
                     }
 
-                    // Scan in shadow direction (opposite of sun)
+                    // Scan toward the sun to check for blocking buildings
                     Real tan_zen = tan(zen_rad);
-                    for (int step = 1; step <= max_shadow_cells; ++step) {
-                        // Step in shadow direction (horizontal)
+                    for (int step = 1; step <= max_scan_cells; ++step) {
+                        // Step toward sun (horizontal)
                         Real scan_i = Real(i) + step * sin(theta);
                         Real scan_j = Real(j) + step * cos(theta);
 
