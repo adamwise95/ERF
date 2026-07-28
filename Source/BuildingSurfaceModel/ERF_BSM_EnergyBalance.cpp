@@ -511,6 +511,25 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             Real rho = cons_arr(i,j,k,Rho_comp);
             Real theta = cons_arr(i,j,k,RhoTheta_comp) / rho;
 
+            Real rho_cellaway = rho;
+            Real theta_cellaway = theta;
+            if (roof_mask) {
+                rho_cellaway = cons_arr(i,j,k+1,Rho_comp);
+                theta_cellaway = cons_arr(i,j,k+1,RhoTheta_comp) / rho_cellaway;
+            } else if (south_mask) {
+                rho_cellaway = cons_arr(i,j-1,k,Rho_comp);
+                theta_cellaway = cons_arr(i,j-1,k,RhoTheta_comp) / rho_cellaway;
+            } else if (north_mask) {
+                rho_cellaway = cons_arr(i,j+1,k,Rho_comp);
+                theta_cellaway = cons_arr(i,j+1,k,RhoTheta_comp) / rho_cellaway;
+            } else if (east_mask) {
+                rho_cellaway = cons_arr(i+1,j,k,Rho_comp);
+                theta_cellaway = cons_arr(i+1,j,k,RhoTheta_comp) / rho_cellaway;
+            } else if (west_mask) {
+                rho_cellaway = cons_arr(i-1,j,k,Rho_comp);
+                theta_cellaway = cons_arr(i-1,j,k,RhoTheta_comp) / rho_cellaway;
+            }
+
             // Get radiation at the height of this building surface cell
             // Only read SW_dn and LW_dn (atmospheric/solar inputs)
             // Note: SW_up = albedo * SW_dn (accounted for in R_net calculation)
@@ -554,7 +573,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // where Ch ~ kappa² / (ln(z/z0))²
                 Real z_ref = dz_cell;  // Reference height (actual cell spacing)
                 Real Ch = (kappa * kappa) / pow(log(z_ref / z0), 2.0);
-                Real H = rho * Cp_d_val * Ch * u_tang * (T_surf_new - theta);
+                Real H = rho * Cp_d_val * Ch * u_tang * (T_surf_new - theta_cellaway);
 
                 // 3. Latent heat flux (Dudhia scheme, simplified)
                 // LE = rho * L_v * Ce * U * q_surf
