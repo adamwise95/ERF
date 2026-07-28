@@ -59,14 +59,26 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
             const Array4<Real>& T3_arr = T3.array(mfi);
             const Array4<Real>& T4_arr = T4.array(mfi);
 
-            // Set subsurface 5K cooler than surface (building interior)
+            const Real theta_dir = m_theta_dir;  // Deep interior temp for GPU
+
+            // Set subsurface with temperature gradient from surface to interior
+            // T1 (near surface) warmest, T4 (deep) coolest (near building interior)
             ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
-                Real T_init = T_surf_arr(i,j,k) - 5.0;
-                T1_arr(i,j,k) = T_init;
-                T2_arr(i,j,k) = T_init;
-                T3_arr(i,j,k) = T_init;
-                T4_arr(i,j,k) = T_init;
+                Real T_surf = T_surf_arr(i,j,k);
+
+                // Linear gradient from surface to deep interior
+                // Layer 1: closest to surface (warmest)
+                T1_arr(i,j,k) = T_surf - 2.0;
+
+                // Layer 2: intermediate
+                T2_arr(i,j,k) = T_surf - 4.0;
+
+                // Layer 3: cooler
+                T3_arr(i,j,k) = T_surf - 6.0;
+
+                // Layer 4: deepest, near building interior temperature
+                T4_arr(i,j,k) = theta_dir;
             });
         }
         m_subsurface_initialized = true;
