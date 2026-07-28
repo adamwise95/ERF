@@ -571,9 +571,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // 2. Sensible heat flux (simplified MOST)
                 // H = rho * Cp * Ch * U * (T_surf - T_air)
                 // where Ch ~ kappa² / (ln(z/z0))²
+                // Use rho and theta from adjacent air cell
                 Real z_ref = dz_cell;  // Reference height (actual cell spacing)
                 Real Ch = (kappa * kappa) / pow(log(z_ref / z0), 2.0);
-                Real H = rho * Cp_d_val * Ch * u_tang * (T_surf_new - theta_cellaway);
+                Real H = rho_cellaway * Cp_d_val * Ch * u_tang * (T_surf_new - theta_cellaway);
 
                 // 3. Latent heat flux (Dudhia scheme, simplified)
                 // LE = rho * L_v * Ce * U * q_surf
