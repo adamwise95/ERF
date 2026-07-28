@@ -129,8 +129,10 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
         if (solverChoice.building_surface_type == BuildingSurfaceType::Simple) {
             bsm.ReSize(finest_level+1);
             bsm.SetModel<BSM_Simple>();
+        } else if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance) {
+            bsm.ReSize(finest_level+1);
+            bsm.SetModel<BSM_EnergyBalance>();
         }
-        // EnergyBalance model will be added in Phase 3
     }
     if (solverChoice.building_surface_type != BuildingSurfaceType::None) {
         bsm.Define(lev, solverChoice);

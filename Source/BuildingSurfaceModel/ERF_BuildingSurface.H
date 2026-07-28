@@ -8,6 +8,7 @@
 
 #include <ERF_BuildingSurfBase.H>
 #include <ERF_BSM_Simple.H>
+#include <ERF_BSM_EnergyBalance.H>
 
 /**
  * @brief Wrapper class for building surface models
