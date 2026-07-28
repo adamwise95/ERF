@@ -337,7 +337,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             // Read shadow state from pre-computed shadow mask (Pass 1)
             bool is_shaded = false;
             if (shadow_arr) {
-                is_shaded = (shadow_arr(i,j,k) > 0.5);
+                is_shaded = (shadow_arr(i,j,k) > 0.0);
             }
 
             // Select velocity components based on surface orientation
