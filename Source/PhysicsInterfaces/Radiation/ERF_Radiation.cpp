@@ -1155,11 +1155,14 @@ Radiation::run_impl ()
     // Populate mu0 1D array
     // This must be done on HOST and copied to device.
     auto h_mu0 = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mu0);
+
+    // Create host mirrors for lat/lon (needed for sun angle calculation)
+    auto h_lat = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lat);
+    auto h_lon = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lon);
+
     if (m_fixed_solar_zenith_angle > 0) {
         Kokkos::deep_copy(h_mu0, m_fixed_solar_zenith_angle);
     } else {
-        auto h_lat = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lat);
-        auto h_lon = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lon);
         double dt  = double(m_dt);
         auto rad_freq_in_steps = m_rad_freq_in_steps;
         Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Serial>(0, ncol),
@@ -1188,8 +1191,8 @@ Radiation::run_impl ()
     // Compute azimuth using WRF formula (from module_radiation_driver.F)
     // Use domain center coordinates
     const int icol_center = ncol / 2;
-    const Real lat_center = h_lat(icol_center);
-    const Real lon_center = h_lon(icol_center);
+    const Real lat_center = h_lat(icol_center) * PI / Real(180.0);  // Convert to radians
+    const Real lon_center = h_lon(icol_center) * PI / Real(180.0);  // Convert to radians
 
     // Hour angle (like WRF HRANG)
     const Real gmt = 0.0;  // Assume UTC for now
