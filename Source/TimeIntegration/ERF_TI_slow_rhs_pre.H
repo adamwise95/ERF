@@ -101,16 +101,23 @@
         // *****************************************************************************
         // Construct the source terms for the cell-centered (conserved) variables
         // *****************************************************************************
+        // Get BSM surface temperature if enabled
+        const MultiFab* bsm_surf_temp = (solverChoice.building_surface_type != BuildingSurfaceType::None)
+                                        ? bsm.Get_Data_Ptr(level, "surf_temp")
+                                        : nullptr;
+
         make_sources(level, nrk, slow_dt, old_stage_time,
                      S_data, S_prim, cc_src, base_state[level], zpc_to_use,
                      xvel_new, yvel_new, zvel_new,
                      qheating_rates[level].get(),
+                     (solverChoice.rad_type != RadiationType::None) ? rad_fluxes[level].get() : nullptr,
                      terrain_blank, fine_geom, solverChoice,
                      mapfac[level],
                      rhotheta_src[level].get(), rhoqt_src[level].get(),
                      dptr_wbar_sub, d_rayleigh_ptrs_at_lev, d_sinesq_at_lev,
                       (solverChoice.hindcast_surface_bcs? &surface_state_interp[level] : nullptr),
-                     input_sounding_data, turbPert, true);
+                     input_sounding_data, turbPert,
+                     bsm_surf_temp, true);
 
         // *****************************************************************************
         // Add nudging terms on moist variables if we have a non-zero relaxation region

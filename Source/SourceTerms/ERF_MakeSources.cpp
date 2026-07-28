@@ -44,6 +44,7 @@ void make_sources (int level,
                    const  MultiFab & yvel,
                    const  MultiFab & zvel,
                    const MultiFab* qheating_rates,
+                   const MultiFab* rad_fluxes,
                           MultiFab* terrain_blank,
                    const Geometry geom,
                    const SolverChoice& solverChoice,
@@ -56,6 +57,7 @@ void make_sources (int level,
                    const MultiFab* surface_state_at_lev,
                    InputSoundingData& input_sounding_data,
                    TurbulentPerturbation& turbPert,
+                   const MultiFab* bsm_surf_temp,
                    bool is_slow_step)
 {
     BL_PROFILE_REGION("erf_make_sources()");
@@ -664,8 +666,14 @@ void make_sources (int level,
                 Real theta_neighbor       = cell_data(i,j,k+1,RhoTheta_comp) / cell_data(i,j,k+1,Rho_comp);
 
                 // SURFACE TEMP AND HEATING/COOLING RATE
-                if (init_surf_temp > zero) {
-                    const Real surf_temp    = init_surf_temp + surf_heating_rate*time;
+                Real surf_temp;
+                if (bsm_surf_temp != nullptr) {
+                    // Use BSM-computed temperature from energy balance
+                    const Array4<const Real>& bsm_temp_arr = bsm_surf_temp->const_array(mfi);
+                    surf_temp = bsm_temp_arr(i,j,k);
+                } else if (init_surf_temp > zero) {
+                    // Fall back to prescribed temperature
+                    surf_temp = init_surf_temp + surf_heating_rate*time;
                     if (t_blank > 0 && (t_blank_above == zero) && (t_blank_below == one)) { // building roof
                         const Real bc_forcing_rt_srf = -(cell_data(i,j,k,Rho_comp) * surf_temp - cell_data(i,j,k,RhoTheta_comp));
                         cell_src(i, j, k, RhoTheta_comp) -= drag_coefficient * U_s * bc_forcing_rt_srf;
@@ -702,6 +710,8 @@ void make_sources (int level,
                         }
 
                     }
+                } else {
+                    // No BSM or prescribed temp - skip thermal forcing
                 }
 
                 // SURFACE HEAT FLUX
