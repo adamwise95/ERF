@@ -38,6 +38,40 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
                                   rad_fluxes, terrain_blank, z_phys_cc, shadow_mask,
                                   dx_arr, sun_azimuth_deg, sun_zenith_deg, time);
 
+    // One-time initialization: set subsurface temps from converged surface temps
+    if (!m_subsurface_initialized) {
+        amrex::Print() << "BSM: Initializing subsurface from converged surface temperatures\n";
+        MultiFab& T_surf = *m_vars[surf_temp_idx];
+        MultiFab& T1 = *m_vars[layer1_temp_idx];
+        MultiFab& T2 = *m_vars[layer2_temp_idx];
+        MultiFab& T3 = *m_vars[layer3_temp_idx];
+        MultiFab& T4 = *m_vars[layer4_temp_idx];
+
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.tilebox();
+            const Array4<const Real>& T_surf_arr = T_surf.const_array(mfi);
+            const Array4<Real>& T1_arr = T1.array(mfi);
+            const Array4<Real>& T2_arr = T2.array(mfi);
+            const Array4<Real>& T3_arr = T3.array(mfi);
+            const Array4<Real>& T4_arr = T4.array(mfi);
+
+            // Set subsurface 5K cooler than surface (building interior)
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                Real T_init = T_surf_arr(i,j,k) - 5.0;
+                T1_arr(i,j,k) = T_init;
+                T2_arr(i,j,k) = T_init;
+                T3_arr(i,j,k) = T_init;
+                T4_arr(i,j,k) = T_init;
+            });
+        }
+        m_subsurface_initialized = true;
+    }
+
     // Update subsurface temperatures via thermal diffusion
     AdvanceSubsurface();
 }

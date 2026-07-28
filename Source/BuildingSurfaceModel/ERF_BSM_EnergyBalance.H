@@ -84,6 +84,9 @@ protected:
     amrex::Real m_emissivity = 0.9;      // Surface emissivity
     amrex::Real m_moisture_avail = 0.0;  // Moisture availability (0-1)
 
+    // Initialization flag
+    bool m_subsurface_initialized = false;
+
 };
 
 #endif
