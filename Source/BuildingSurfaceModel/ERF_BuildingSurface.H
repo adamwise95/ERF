@@ -63,13 +63,14 @@ public:
              const amrex::MultiFab& yvel_in,
              const amrex::MultiFab& zvel_in,
              const amrex::MultiFab* rad_fluxes,
+             const amrex::MultiFab* terrain_blank,
              const double& time,
              const double& dt_advance)
     {
         amrex::Real time_r = static_cast<amrex::Real>(time);
         amrex::Real dt_r = static_cast<amrex::Real>(dt_advance);
         m_bsm_model[lev]->Advance_With_State(lev, cons_in, xvel_in, yvel_in, zvel_in,
-                                             rad_fluxes, time_r, dt_r);
+                                             rad_fluxes, terrain_blank, time_r, dt_r);
     }
 
     void

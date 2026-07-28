@@ -54,6 +54,7 @@ public:
                         const amrex::MultiFab& yvel_in,
                         const amrex::MultiFab& zvel_in,
                         const amrex::MultiFab* rad_fluxes,
+                        const amrex::MultiFab* terrain_blank,
                         const amrex::Real& time,
                         const amrex::Real& dt_advance) override;
 

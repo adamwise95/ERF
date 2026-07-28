@@ -29,7 +29,9 @@ void ERF::advance_bsm (int lev,
     if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance) {
         // Full energy balance model with state coupling
         bsm.Advance(lev, cons_in, xvel_in, yvel_in, zvel_in,
-                    rad_fluxes[lev].get(), time, dt_advance);
+                    rad_fluxes[lev].get(),
+                    terrain_blanking[lev].get(),
+                    time, dt_advance);
     } else if (solverChoice.building_surface_type == BuildingSurfaceType::Simple) {
         // Simple thermal diffusion only
         bsm.Advance(lev, dt_advance);
