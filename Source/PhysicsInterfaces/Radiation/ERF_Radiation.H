@@ -203,7 +203,7 @@ public:
     }
 
     // Get sun angles for shadow mask calculations
-    void Get_Sun_Angles(amrex::Real& azimuth_deg, amrex::Real& zenith_deg) const {
+    void Get_Sun_Angles(amrex::Real& azimuth_deg, amrex::Real& zenith_deg) const override {
         azimuth_deg = m_sun_azimuth_deg;
         zenith_deg = m_sun_zenith_deg;
     }
