@@ -55,6 +55,11 @@ public:
                         const amrex::MultiFab& zvel_in,
                         const amrex::MultiFab* rad_fluxes,
                         const amrex::MultiFab* terrain_blank,
+                        const amrex::MultiFab* z_phys_cc,
+                        amrex::MultiFab* shadow_mask,
+                        const amrex::GpuArray<amrex::Real,3>& dx_arr,
+                        const amrex::Real& sun_azimuth_deg,
+                        const amrex::Real& sun_zenith_deg,
                         const amrex::Real& time,
                         const amrex::Real& dt_advance) override;
 
@@ -67,7 +72,9 @@ protected:
         const amrex::MultiFab& zvel_in,
         const amrex::MultiFab* rad_fluxes,
         const amrex::MultiFab* terrain_blank,
+        const amrex::MultiFab* z_phys_cc,
         amrex::MultiFab* shadow_mask,
+        const amrex::GpuArray<amrex::Real,3>& dx_arr,
         amrex::Real sun_azimuth_deg,
         amrex::Real sun_zenith_deg,
         amrex::Real time);

@@ -32,11 +32,18 @@ void ERF::advance_bsm (int lev,
         double sun_azimuth_deg = 180.0;  // South
         double sun_zenith_deg = 30.0;    // 30° from vertical
 
+        // Grid spacing array for stretched/terrain-following coordinates
+        GpuArray<Real,3> dx_arr = {geom[lev].CellSize(0),
+                                   geom[lev].CellSize(1),
+                                   geom[lev].CellSize(2)};
+
         // Full energy balance model with state coupling
         bsm.Advance(lev, cons_in, xvel_in, yvel_in, zvel_in,
                     rad_fluxes[lev].get(),
                     terrain_blanking[lev].get(),
+                    z_phys_cc[lev].get(),
                     building_shadow_mask[lev].get(),
+                    dx_arr,
                     sun_azimuth_deg,
                     sun_zenith_deg,
                     time, dt_advance);

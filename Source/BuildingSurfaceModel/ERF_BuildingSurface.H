@@ -64,7 +64,9 @@ public:
              const amrex::MultiFab& zvel_in,
              const amrex::MultiFab* rad_fluxes,
              const amrex::MultiFab* terrain_blank,
+             const amrex::MultiFab* z_phys_cc,
              amrex::MultiFab* shadow_mask,
+             const amrex::GpuArray<amrex::Real,3>& dx_arr,
              const double& sun_azimuth_deg,
              const double& sun_zenith_deg,
              const double& time,
@@ -75,8 +77,8 @@ public:
         amrex::Real sun_az_r = static_cast<amrex::Real>(sun_azimuth_deg);
         amrex::Real sun_zen_r = static_cast<amrex::Real>(sun_zenith_deg);
         m_bsm_model[lev]->Advance_With_State(lev, cons_in, xvel_in, yvel_in, zvel_in,
-                                             rad_fluxes, terrain_blank, shadow_mask,
-                                             sun_az_r, sun_zen_r, time_r, dt_r);
+                                             rad_fluxes, terrain_blank, z_phys_cc, shadow_mask,
+                                             dx_arr, sun_az_r, sun_zen_r, time_r, dt_r);
     }
 
     void

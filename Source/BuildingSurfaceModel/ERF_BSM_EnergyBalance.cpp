@@ -23,7 +23,9 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
                                        const MultiFab& zvel_in,
                                        const MultiFab* rad_fluxes,
                                        const MultiFab* terrain_blank,
+                                       const MultiFab* z_phys_cc,
                                        MultiFab* shadow_mask,
+                                       const GpuArray<Real,3>& dx_arr,
                                        const Real& sun_azimuth_deg,
                                        const Real& sun_zenith_deg,
                                        const Real& time,
@@ -33,8 +35,8 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
 
     // Solve surface energy balance to get updated surface temperature
     Solve_Surface_Energy_Balance(cons_in, xvel_in, yvel_in, zvel_in,
-                                  rad_fluxes, terrain_blank, shadow_mask,
-                                  sun_azimuth_deg, sun_zenith_deg, time);
+                                  rad_fluxes, terrain_blank, z_phys_cc, shadow_mask,
+                                  dx_arr, sun_azimuth_deg, sun_zenith_deg, time);
 
     // Update subsurface temperatures via thermal diffusion
     AdvanceSubsurface();
@@ -60,7 +62,9 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
     const MultiFab& zvel_in,
     const MultiFab* rad_fluxes,
     const MultiFab* terrain_blank,
+    const MultiFab* z_phys_cc,
     MultiFab* shadow_mask,
+    const GpuArray<Real,3>& dx_arr,
     Real sun_azimuth_deg,
     Real sun_zenith_deg,
     Real time)
@@ -96,6 +100,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
         const Array4<const Real>& t_blank_arr = (terrain_blank) ? terrain_blank->const_array(mfi)
                                                                 : Array4<const Real>{};
 
+        // Physical grid heights (cell-centered)
+        const Array4<const Real>& z_cc_arr = (z_phys_cc) ? z_phys_cc->const_array(mfi)
+                                                         : Array4<const Real>{};
+
         // Radiation fluxes (SW_up, SW_dn, LW_up, LW_dn at each k level)
         const Array4<const Real>& rad_arr = (rad_fluxes) ? rad_fluxes->const_array(mfi)
                                                          : Array4<const Real>{};
@@ -114,9 +122,9 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
         const Real emissivity = m_emissivity;
         const Real moisture_avail = m_moisture_avail;
         const Real k_concrete = m_k;
-        const Real dz = m_dz;
+        const Real dz_subsurface = m_dz;  // Subsurface layer spacing
 
-        // Domain bounds for ray marching
+        // Domain bounds for shadow mask
         const auto& domain = cons_in.boxArray().minimalBox();
         const int k_max = domain.bigEnd(2);
 
@@ -227,12 +235,19 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                     Real shadow_az = fmod(sun_az + 180.0, 360.0);
                     Real theta = shadow_az * (PI / 180.0);
 
-                    // Max shadow length in cells (like WRF's gpshad)
-                    // Use 25000m / cell_size as max search distance
-                    const int max_shadow_cells = 50;  // Reasonable for urban scales
+                    // Max shadow length (like WRF's gpshad)
+                    // Use max 25000m / cell_size, or cap at 50 cells for efficiency
+                    const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
+                    const int max_shadow_cells = amrex::min(50, int(25000.0 / dx_horiz));
 
-                    // Get this cell's height (top of building surface)
-                    Real cell_height = Real(k) * dz;
+                    // Get this cell's physical height (use z_cc if available)
+                    Real cell_height;
+                    if (z_cc_arr) {
+                        cell_height = z_cc_arr(i,j,k);
+                    } else {
+                        // Fall back to uniform grid
+                        cell_height = (Real(k) + 0.5) * dx_arr[2];
+                    }
 
                     // Scan in shadow direction (opposite of sun)
                     Real tan_zen = tan(zen_rad);
@@ -247,8 +262,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                         // Check horizontal bounds
                         if (!bx.contains(IntVect(ii, jj, k))) break;
 
-                        // Distance from this cell
-                        Real dist_horiz = sqrt((ii-i)*(ii-i) + (jj-j)*(jj-j)) * dz;
+                        // Horizontal distance from this cell
+                        Real di = Real(ii - i) * dx_arr[0];
+                        Real dj = Real(jj - j) * dx_arr[1];
+                        Real dist_horiz = sqrt(di*di + dj*dj);
 
                         // Scan vertically at this (i,j) location
                         // Find highest solid cell (building top)
@@ -256,7 +273,14 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                         for (int kk = 0; kk <= k_max; ++kk) {
                             Real t_neighbor = t_blank_arr(ii, jj, kk);
                             if (t_neighbor > 0.5) {
-                                neighbor_height = Real(kk+1) * dz;  // Top of solid cell
+                                // Get physical height of top of this cell
+                                if (z_cc_arr) {
+                                    Real dz_cell = (kk > 0) ? (z_cc_arr(ii,jj,kk) - z_cc_arr(ii,jj,kk-1))
+                                                            : dx_arr[2];
+                                    neighbor_height = z_cc_arr(ii,jj,kk) + 0.5*dz_cell;
+                                } else {
+                                    neighbor_height = Real(kk+1) * dx_arr[2];
+                                }
                             }
                         }
 
@@ -285,6 +309,14 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 sw_dn = 0.0;
             }
 
+            // Get cell vertical spacing for MOST reference height
+            Real dz_cell;
+            if (z_cc_arr && k > 0) {
+                dz_cell = z_cc_arr(i,j,k) - z_cc_arr(i,j,k-1);
+            } else {
+                dz_cell = dx_arr[2];
+            }
+
             // Initial guess for surface temperature
             Real T_surf_old = T_surf_arr(i,j,k);
             Real T_surf_new = T_surf_old;
@@ -298,7 +330,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // 2. Sensible heat flux (simplified MOST)
                 // H = rho * Cp * Ch * U * (T_surf - T_air)
                 // where Ch ~ kappa² / (ln(z/z0))²
-                Real z_ref = dz;  // Reference height
+                Real z_ref = dz_cell;  // Reference height (actual cell spacing)
                 Real Ch = (kappa * kappa) / pow(log(z_ref / z0), 2.0);
                 Real H = rho * Cp_d_val * Ch * u_tang * (T_surf_new - theta);
 
@@ -320,7 +352,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // d(residual)/dT = -4*emiss*sigma*T³ - rho*Cp*Ch*U - k/dz
                 Real d_lw_up_dT = 4.0 * emissivity * sigma * pow(T_surf_new, 3.0);
                 Real d_H_dT = rho * Cp_d_val * Ch * u_tang;
-                Real d_G_dT = k_concrete / dz;
+                Real d_G_dT = k_concrete / dz_subsurface;
                 Real derivative = -d_lw_up_dT - d_H_dT - d_G_dT;
 
                 // 7. Newton step
