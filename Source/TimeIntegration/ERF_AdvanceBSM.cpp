@@ -73,6 +73,8 @@ void ERF::advance_bsm (int lev,
 
         // Full energy balance model with state coupling
         // Pass shadow_mask only if we're updating it this step
+        amrex::Print() << "BSM: Calling energy balance solver at step " << istep[lev]
+                      << ", time=" << time << ", dt=" << dt_advance << std::endl;
         bsm.Advance(lev, cons_in, xvel_in, yvel_in, zvel_in,
                     rad_fluxes[lev].get(),
                     terrain_blanking[lev].get(),
@@ -82,8 +84,10 @@ void ERF::advance_bsm (int lev,
                     sun_azimuth_deg,
                     sun_zenith_deg,
                     time, dt_advance);
+        amrex::Print() << "BSM: Finished energy balance, calling AdvanceSubsurface" << std::endl;
     } else if (solverChoice.building_surface_type == BuildingSurfaceType::Simple) {
         // Simple thermal diffusion only
+        amrex::Print() << "BSM: Calling simple diffusion at step " << istep[lev] << std::endl;
         bsm.Advance(lev, dt_advance);
     }
 }
