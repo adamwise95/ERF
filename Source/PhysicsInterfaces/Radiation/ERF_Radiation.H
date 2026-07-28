@@ -202,6 +202,12 @@ public:
         return m_lsm_output_names;
     }
 
+    // Get sun angles for shadow mask calculations
+    void Get_Sun_Angles(amrex::Real& azimuth_deg, amrex::Real& zenith_deg) const {
+        azimuth_deg = m_sun_azimuth_deg;
+        zenith_deg = m_sun_zenith_deg;
+    }
+
     // Populate datalog structures
     void
     populateDatalogMF ();
@@ -227,6 +233,10 @@ private:
 
     // Timestep at given level
     double m_dt;
+
+    // Solar angles for building shadow mask (computed in Run())
+    amrex::Real m_sun_azimuth_deg = 180.0;  // Azimuth in degrees (0=N, 90=E, 180=S, 270=W)
+    amrex::Real m_sun_zenith_deg = 45.0;    // Zenith in degrees (0=overhead, 90=horizon)
 
     // Geometry at given level
     amrex::Geometry m_geom;

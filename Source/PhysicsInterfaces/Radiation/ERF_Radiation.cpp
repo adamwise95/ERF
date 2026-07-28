@@ -1176,6 +1176,45 @@ Radiation::run_impl ()
     }
     Kokkos::deep_copy(mu0, h_mu0);
 
+    // Compute domain-averaged sun angles for shadow mask
+    // Average mu0 (cos zenith) over all columns
+    Real mu0_avg = 0.0;
+    for (int icol = 0; icol < ncol; ++icol) {
+        mu0_avg += h_mu0(icol);
+    }
+    mu0_avg /= Real(ncol);
+    m_sun_zenith_deg = std::acos(std::min(std::max(mu0_avg, Real(0.0)), Real(1.0))) * Real(180.0) / PI;
+
+    // Compute azimuth using WRF formula (from module_radiation_driver.F)
+    // Use domain center coordinates
+    const int icol_center = ncol / 2;
+    const Real lat_center = h_lat(icol_center);
+    const Real lon_center = h_lon(icol_center);
+
+    // Hour angle (like WRF HRANG)
+    const Real gmt = 0.0;  // Assume UTC for now
+    Real time_hours = m_time / Real(3600.0);
+    Real xtime = fmod(time_hours * Real(60.0), Real(1440.0));  // Minutes in day
+    Real tloctm = gmt + xtime / Real(60.0) + lon_center * Real(180.0)/PI / Real(15.0);
+    Real hrang = Real(15.0) * (tloctm - Real(12.0)) * PI / Real(180.0);  // Hour angle in radians
+
+    // Cosine solar zenith angle for center
+    Real csza = std::sin(lat_center) * std::sin(delta) +
+                std::cos(lat_center) * std::cos(delta) * std::cos(hrang);
+
+    if (csza < Real(1.e-2)) {
+        // Sun below horizon or grazing - set to twilight
+        m_sun_azimuth_deg = 180.0;  // South
+        m_sun_zenith_deg = 85.0;     // Near horizon
+    } else {
+        // Solar azimuth angle (WRF formula)
+        Real argu = (csza * std::sin(lat_center) - std::sin(delta)) /
+                    (std::sin(std::acos(csza)) * std::cos(lat_center));
+        argu = std::min(std::max(argu, Real(-1.0)), Real(1.0));  // Clamp to [-1,1]
+        Real sol_azi = std::copysign(std::acos(argu), std::sin(hrang)) + PI;  // [0, 2π]
+        m_sun_azimuth_deg = sol_azi * Real(180.0) / PI;  // Convert to degrees
+    }
+
     // Compute layer cloud mass per unit area (populates lwp/iwp)
     rrtmgp::mixing_ratio_to_cloud_mass(qc_lay, cldfrac_tot, r_lay, z_del, lwp);
     rrtmgp::mixing_ratio_to_cloud_mass(qi_lay, cldfrac_tot, r_lay, z_del, iwp);
