@@ -150,13 +150,15 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
                 const Real max_dist = amrex::min(25000.0, 50.0 * dx_horiz);
 
-                // Number of ray steps to check
-                const int n_steps = 10;
+                // Number of steps: sample approximately every grid cell to avoid missing buildings
+                // Use at least 50 steps, or enough to sample every dx_horiz
+                const int n_steps = amrex::max(50, int(max_dist / dx_horiz));
 
                 bool is_shaded = false;
                 for (int step = 1; step <= n_steps; ++step) {
-                    Real frac = Real(step) / Real(n_steps);
-                    Real dist = frac * max_dist;
+                    // Step incrementally toward sun (not fractional - check each cell)
+                    Real dist = Real(step) * dx_horiz;
+                    if (dist > max_dist) break;
 
                     // Horizontal position along ray toward sun
                     Real x_ray = dist * sin(sun_azimuth);  // North = 0°, East = 90°
