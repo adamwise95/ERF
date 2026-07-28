@@ -95,6 +95,10 @@ BSM_Simple::AdvanceSubsurface ()
     // Diffusion coefficient: dt * d / dz²
     Real coeff = m_dt * m_d / (m_dz * m_dz);
 
+    // Debug: print diffusion coefficient
+    amrex::Print() << "BSM AdvanceSubsurface: dt=" << m_dt << ", d=" << m_d
+                   << ", dz=" << m_dz << ", coeff=" << coeff << std::endl;
+
     // Stability criterion for explicit diffusion: coeff <= 0.5
     if (coeff > 0.5) {
         amrex::Print() << "WARNING: BSM_Simple diffusion may be unstable! "
