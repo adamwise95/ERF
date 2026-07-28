@@ -343,7 +343,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 Real LE = rho * L_v * Ce * u_tang * moisture_avail * q_sat;
 
                 // 4. Ground heat conduction
-                Real G = k_concrete * (T_surf_new - T1_arr(i,j,k)) / dz;
+                Real G = k_concrete * (T_surf_new - T1_arr(i,j,k)) / dz_subsurface;
 
                 // 5. Energy balance residual
                 Real residual = R_net - H - LE - G;

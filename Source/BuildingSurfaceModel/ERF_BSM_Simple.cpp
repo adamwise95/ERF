@@ -131,6 +131,8 @@ BSM_Simple::AdvanceSubsurface ()
         const Array4<Real>& T3_arr = T3.array(mfi);
         const Array4<Real>& T4_arr = T4.array(mfi);
 
+        const Real theta_dir = m_theta_dir;  // Capture deep temp for GPU
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
             // Layer 1: flux from surface and layer 2
@@ -150,7 +152,7 @@ BSM_Simple::AdvanceSubsurface ()
 
             // Layer 4: flux from layer 3 and deep BC
             T4_arr(i,j,k) = T4_old_arr(i,j,k) + coeff * (
-                T3_old_arr(i,j,k) - 2.0*T4_old_arr(i,j,k) + m_theta_dir
+                T3_old_arr(i,j,k) - 2.0*T4_old_arr(i,j,k) + theta_dir
             );
         });
     }
