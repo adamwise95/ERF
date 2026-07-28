@@ -82,6 +82,8 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
     // ========================================================================
     // PASS 1: Compute shadow mask for ALL cells
     // ========================================================================
+    // Wrap in explicit scope to ensure MFIter is destroyed before Pass 2
+    {
     if (shadow_mask && rad_fluxes) {
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
@@ -229,10 +231,13 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             }
         }
     }
+    } // End Pass 1 scope
 
     // ========================================================================
     // PASS 2: Compute energy balance for building surfaces using shadow mask
     // ========================================================================
+    // Separate scope ensures Pass 1 MFIter is fully destroyed
+    {
 
     // Physical constants (min_t_blank already declared above)
     const Real sigma = 5.67e-8;        // Stefan-Boltzmann [W/m²K⁴]
