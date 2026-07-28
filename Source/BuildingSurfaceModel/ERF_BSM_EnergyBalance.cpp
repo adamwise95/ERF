@@ -547,6 +547,8 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
         });
     }
 
+    } // End Pass 2 scope
+
 //     // ============================================================================
 //     // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
 //     // ============================================================================
