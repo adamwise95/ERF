@@ -64,13 +64,19 @@ public:
              const amrex::MultiFab& zvel_in,
              const amrex::MultiFab* rad_fluxes,
              const amrex::MultiFab* terrain_blank,
+             amrex::MultiFab* shadow_mask,
+             const double& sun_azimuth_deg,
+             const double& sun_zenith_deg,
              const double& time,
              const double& dt_advance)
     {
         amrex::Real time_r = static_cast<amrex::Real>(time);
         amrex::Real dt_r = static_cast<amrex::Real>(dt_advance);
+        amrex::Real sun_az_r = static_cast<amrex::Real>(sun_azimuth_deg);
+        amrex::Real sun_zen_r = static_cast<amrex::Real>(sun_zenith_deg);
         m_bsm_model[lev]->Advance_With_State(lev, cons_in, xvel_in, yvel_in, zvel_in,
-                                             rad_fluxes, terrain_blank, time_r, dt_r);
+                                             rad_fluxes, terrain_blank, shadow_mask,
+                                             sun_az_r, sun_zen_r, time_r, dt_r);
     }
 
     void

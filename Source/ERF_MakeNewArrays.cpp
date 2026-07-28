@@ -468,6 +468,15 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     }
 
     //*********************************************************
+    // Building shadow mask (for verification and output)
+    //*********************************************************
+    if (solverChoice.building_surface_type == BuildingSurfaceType::EnergyBalance)
+    {
+        building_shadow_mask[lev] = std::make_unique<MultiFab>(ba, dm, 1, 0);
+        building_shadow_mask[lev]->setVal(zero);
+    }
+
+    //*********************************************************
     // Turbulent perturbation region initialization
     //*********************************************************
     if (solverChoice.use_perturbation(lev))

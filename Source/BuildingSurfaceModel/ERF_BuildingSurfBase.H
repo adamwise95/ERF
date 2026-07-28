@@ -44,6 +44,9 @@ class BuildingSurfBase {
                         const amrex::MultiFab& /*zvel_in*/,
                         const amrex::MultiFab* /*rad_fluxes*/,
                         const amrex::MultiFab* /*terrain_blank*/,
+                        amrex::MultiFab* /*shadow_mask*/,
+                        const amrex::Real& /*sun_azimuth_deg*/,
+                        const amrex::Real& /*sun_zenith_deg*/,
                         const amrex::Real& /*time*/,
                         const amrex::Real& /*dt_advance*/) { }
 

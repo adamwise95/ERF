@@ -23,6 +23,9 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
                                        const MultiFab& zvel_in,
                                        const MultiFab* rad_fluxes,
                                        const MultiFab* terrain_blank,
+                                       MultiFab* shadow_mask,
+                                       const Real& sun_azimuth_deg,
+                                       const Real& sun_zenith_deg,
                                        const Real& time,
                                        const Real& dt_advance)
 {
@@ -30,7 +33,8 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
 
     // Solve surface energy balance to get updated surface temperature
     Solve_Surface_Energy_Balance(cons_in, xvel_in, yvel_in, zvel_in,
-                                  rad_fluxes, terrain_blank, time);
+                                  rad_fluxes, terrain_blank, shadow_mask,
+                                  sun_azimuth_deg, sun_zenith_deg, time);
 
     // Update subsurface temperatures via thermal diffusion
     AdvanceSubsurface();
@@ -56,6 +60,9 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
     const MultiFab& zvel_in,
     const MultiFab* rad_fluxes,
     const MultiFab* terrain_blank,
+    MultiFab* shadow_mask,
+    Real sun_azimuth_deg,
+    Real sun_zenith_deg,
     Real time)
 {
     // Get temperature arrays
@@ -94,11 +101,24 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                                                          : Array4<const Real>{};
         const bool has_radiation = (rad_fluxes != nullptr);
 
+        // Shadow mask output
+        const Array4<Real>& shadow_arr = (shadow_mask) ? shadow_mask->array(mfi)
+                                                       : Array4<Real>{};
+        const bool compute_shadow = (shadow_mask != nullptr);
+
+        // Sun angles for shadow calculation
+        const Real sun_az = sun_azimuth_deg;
+        const Real sun_zen = sun_zenith_deg;
+
         const Real albedo = m_albedo;
         const Real emissivity = m_emissivity;
         const Real moisture_avail = m_moisture_avail;
         const Real k_concrete = m_k;
         const Real dz = m_dz;
+
+        // Domain bounds for ray marching
+        const auto& domain = cons_in.boxArray().minimalBox();
+        const int k_max = domain.bigEnd(2);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
@@ -191,27 +211,59 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 lw_dn = rad_arr(i,j,k,3);
             }
 
-            // Simple shadow mask: check if there's a building above this cell
-            // If shaded, zero out the direct shortwave component
-            // This is a simplified approach - assumes vertical walls can be shaded from above
+            // 3D ray marching shadow mask following sun direction
+            // Cast ray from surface toward sun to check if blocked by buildings
             bool is_shaded = false;
-            if (roof_mask == 0.0) {  // Only walls can be shaded (not roofs)
-                // Check if there's solid material above (building extending higher)
-                // Scan upward to see if we encounter a solid cell
-                for (int kk = k+1; kk < k+10; ++kk) {  // Check up to 10 cells above
-                    Real t_above = t_blank_arr(i,j,kk);
-                    if (t_above > 0.5) {  // Solid cell above
+            if (compute_shadow && has_radiation) {
+                // Shadow falls opposite to sun direction
+                const Real PI = 3.14159265358979323846;
+                Real shadow_az = fmod(sun_az + 180.0, 360.0);
+                Real theta = shadow_az * (PI / 180.0);
+                Real zen_rad = sun_zen * (PI / 180.0);
+                Real tan_zen = tan(zen_rad);
+
+                // Ray step sizes (i,j per k level)
+                Real di = sin(theta) * tan_zen;
+                Real dj = cos(theta) * tan_zen;
+
+                // Ray march toward sun (opposite of shadow direction)
+                // Start from this cell and march upward
+                const int max_steps = 50;
+                for (int step = 1; step < max_steps; ++step) {
+                    // March toward sun (upward and horizontally)
+                    Real ray_i = Real(i) - step * di;
+                    Real ray_j = Real(j) - step * dj;
+                    int ray_k = k + step;
+
+                    // Round to nearest cell
+                    int ii = int(round(ray_i));
+                    int jj = int(round(ray_j));
+
+                    // Check if ray escaped domain vertically
+                    if (ray_k > k_max) break;
+
+                    // Check bounds (horizontally, periodic or wall BC)
+                    if (!bx.contains(IntVect(ii, jj, ray_k))) break;
+
+                    // Check if ray hit solid building
+                    Real t_ray = t_blank_arr(ii, jj, ray_k);
+                    if (t_ray > 0.5) {
                         is_shaded = true;
                         break;
                     }
                 }
             }
 
-            // Apply shadow mask: reduce direct SW to zero if shaded
-            // Note: This zeroes ALL SW, not just direct component
-            // Could be refined to separate direct/diffuse SW components
+            // Store shadow mask for output/verification
+            if (compute_shadow) {
+                shadow_arr(i,j,k) = is_shaded ? 1.0 : 0.0;
+            }
+
+            // Apply shadow: zero SW_dn if shaded
+            // Note: This zeros ALL SW (direct + diffuse)
+            // Could be refined to only zero direct component
             if (is_shaded) {
-                sw_dn = 0.0;  // Shaded surface receives no direct SW
+                sw_dn = 0.0;
             }
 
             // Initial guess for surface temperature

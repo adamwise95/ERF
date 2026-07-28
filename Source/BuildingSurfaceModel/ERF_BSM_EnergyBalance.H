@@ -67,6 +67,9 @@ protected:
         const amrex::MultiFab& zvel_in,
         const amrex::MultiFab* rad_fluxes,
         const amrex::MultiFab* terrain_blank,
+        amrex::MultiFab* shadow_mask,
+        amrex::Real sun_azimuth_deg,
+        amrex::Real sun_zenith_deg,
         amrex::Real time);
 
     // Surface properties
