@@ -174,7 +174,10 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             // PART 1: Compute shadow mask for ALL cells (not just building surfaces)
             // ============================================================
 
-            // Select velocity components based on surface orientation
+            // Shadow mask via horizon angle method (WRF-style)
+            // Scan surrounding cells in sun direction to find max elevation angle
+            // If any neighbor blocks the sun path, this cell is shaded
+            bool is_shaded = false;
             // Roof: u and v (horizontal velocities)
             // North/South walls: u and w (tangential to y-normal wall)
             // East/West walls: v and w (tangential to x-normal wall)
@@ -225,10 +228,6 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 }
             }
 
-            // Shadow mask via horizon angle method (WRF-style)
-            // Scan surrounding cells in sun direction to find max elevation angle
-            // If any neighbor blocks the sun path, this cell is shaded
-            bool is_shaded = false;
             if (compute_shadow && has_radiation) {
                 const Real PI = 3.14159265358979323846;
                 Real zen_rad = sun_zen * (PI / 180.0);
