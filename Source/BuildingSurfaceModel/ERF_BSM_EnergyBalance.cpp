@@ -167,13 +167,12 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             Real east_mask  = (t_blank > 0.0 && t_blank <= t_blank_west  && t_blank_east == 0.0) ? 1.0 : 0.0;
             Real west_mask  = (t_blank > 0.0 && t_blank <= t_blank_east  && t_blank_west == 0.0) ? 1.0 : 0.0;
 
-            // Skip if not a building surface
-            if (roof_mask == 0.0 && south_mask == 0.0 && north_mask == 0.0 &&
-                east_mask == 0.0 && west_mask == 0.0) return;
+            bool is_building_surface = (roof_mask > 0.0 || south_mask > 0.0 || north_mask > 0.0 ||
+                                        east_mask > 0.0 || west_mask > 0.0);
 
-            // Get atmospheric state
-            Real rho = cons_arr(i,j,k,Rho_comp);
-            Real theta = cons_arr(i,j,k,RhoTheta_comp) / rho;
+            // ============================================================
+            // PART 1: Compute shadow mask for ALL cells (not just building surfaces)
+            // ============================================================
 
             // Select velocity components based on surface orientation
             // Roof: u and v (horizontal velocities)
@@ -217,6 +216,13 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 // Use radiation at height k (buildings are resolved in height)
                 sw_dn = rad_arr(i,j,k,1);
                 lw_dn = rad_arr(i,j,k,3);
+
+                // Apply shadow: zero SW_dn if shaded
+                // Note: This zeros ALL SW (direct + diffuse)
+                // Could be refined to only zero direct component
+                if (is_shaded) {
+                    sw_dn = 0.0;
+                }
             }
 
             // Shadow mask via horizon angle method (WRF-style)
@@ -297,17 +303,19 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                 }
             }
 
-            // Store shadow mask for output/verification
+            // Store shadow mask for output/verification (for ALL cells)
             if (compute_shadow) {
                 shadow_arr(i,j,k) = is_shaded ? 1.0 : 0.0;
             }
 
-            // Apply shadow: zero SW_dn if shaded
-            // Note: This zeros ALL SW (direct + diffuse)
-            // Could be refined to only zero direct component
-            if (is_shaded) {
-                sw_dn = 0.0;
-            }
+            // ============================================================
+            // PART 2: Energy balance - only for building surfaces
+            // ============================================================
+            if (!is_building_surface) return;  // Skip energy balance for non-building cells
+
+            // Get atmospheric state
+            Real rho = cons_arr(i,j,k,Rho_comp);
+            Real theta = cons_arr(i,j,k,RhoTheta_comp) / rho;
 
             // Get cell vertical spacing for MOST reference height
             Real dz_cell;
