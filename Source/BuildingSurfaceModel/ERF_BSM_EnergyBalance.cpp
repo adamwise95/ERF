@@ -45,6 +45,10 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
 /**
  * Solve the surface energy balance iteratively
  *
+ * Two-pass algorithm:
+ * PASS 1: Compute shadow mask for all cells
+ * PASS 2: Compute energy balance for building surfaces using shadow mask
+ *
  * Energy balance: R_net - H - LE - G = 0
  * where:
  *   R_net = Net radiation (SW + LW)
@@ -72,6 +76,163 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
     // Get temperature arrays
     MultiFab& T_surf = *m_vars[surf_temp_idx];
     MultiFab& T1 = *m_vars[layer1_temp_idx];
+
+    const Real min_t_blank = 1.e-4;    // Minimum terrain_blank threshold
+
+    // ========================================================================
+    // PASS 1: Compute shadow mask for ALL cells
+    // ========================================================================
+    if (shadow_mask && rad_fluxes) {
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.tilebox();
+
+            // Terrain blanking for surface identification
+            const Array4<const Real>& t_blank_arr = (terrain_blank) ? terrain_blank->const_array(mfi)
+                                                                    : Array4<const Real>{};
+
+            // Physical grid heights (cell-centered)
+            const Array4<const Real>& z_cc_arr = (z_phys_cc) ? z_phys_cc->const_array(mfi)
+                                                             : Array4<const Real>{};
+
+            // Shadow mask output
+            const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
+
+            // Sun angles for shadow calculation
+            const Real sun_az = sun_azimuth_deg;
+            const Real sun_zen = sun_zenith_deg;
+
+            // Domain bounds for shadow mask
+            const auto& domain = cons_in.boxArray().minimalBox();
+            const int k_max = domain.bigEnd(2);
+
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                // Skip if no terrain_blank data
+                if (!t_blank_arr) {
+                    shadow_arr(i,j,k) = 0.0;
+                    return;
+                }
+
+                bool is_shaded = false;
+                const Real PI = 3.14159265358979323846;
+                Real zen_rad = sun_zen * (PI / 180.0);
+
+                // Skip if sun is too low (below horizon or grazing)
+                if (zen_rad > 80.0 * PI / 180.0) {
+                    is_shaded = true;  // Sun too low
+                } else {
+                    // Scan TOWARD the sun to check if anything blocks the sun path
+                    Real theta = sun_az * (PI / 180.0);  // Sun direction
+
+                    // Max scan distance
+                    const Real dx_horiz = sqrt(dx_arr[0]*dx_arr[0] + dx_arr[1]*dx_arr[1]);
+                    const int max_scan_cells = amrex::min(50, int(25000.0 / dx_horiz));
+
+                    // Get this cell's physical height
+                    Real cell_height;
+                    if (z_cc_arr) {
+                        cell_height = z_cc_arr(i,j,k);
+                    } else {
+                        cell_height = (Real(k) + 0.5) * dx_arr[2];
+                    }
+
+                    // Scan toward the sun to check for blocking buildings
+                    Real tan_zen = tan(zen_rad);
+                    for (int step = 1; step <= max_scan_cells; ++step) {
+                        // Step toward sun (horizontal)
+                        Real scan_i = Real(i) + step * sin(theta);
+                        Real scan_j = Real(j) + step * cos(theta);
+
+                        int ii = int(round(scan_i));
+                        int jj = int(round(scan_j));
+
+                        // Check horizontal bounds
+                        if (!bx.contains(IntVect(ii, jj, k))) break;
+
+                        // Horizontal distance from this cell
+                        Real di = Real(ii - i) * dx_arr[0];
+                        Real dj = Real(jj - j) * dx_arr[1];
+                        Real dist_horiz = sqrt(di*di + dj*dj);
+
+                        // Scan vertically at this (i,j) location
+                        // Find highest solid cell (building top)
+                        Real neighbor_height = 0.0;
+                        for (int kk = 0; kk <= k_max; ++kk) {
+                            Real t_neighbor = t_blank_arr(ii, jj, kk);
+                            if (t_neighbor > 0.5) {
+                                // Get physical height of top of this cell
+                                if (z_cc_arr) {
+                                    Real dz_cell = (kk > 0) ? (z_cc_arr(ii,jj,kk) - z_cc_arr(ii,jj,kk-1))
+                                                            : dx_arr[2];
+                                    neighbor_height = z_cc_arr(ii,jj,kk) + 0.5*dz_cell;
+                                } else {
+                                    neighbor_height = Real(kk+1) * dx_arr[2];
+                                }
+                            }
+                        }
+
+                        // Check if this neighbor blocks sun
+                        Real elev_angle = atan((neighbor_height - cell_height) / dist_horiz);
+                        Real sun_elev = PI/2.0 - zen_rad;
+
+                        if (elev_angle > sun_elev) {
+                            is_shaded = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Store shadow mask
+                shadow_arr(i,j,k) = is_shaded ? 1.0 : 0.0;
+            });
+        }
+
+        // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
+        {
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+            for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
+
+                // Create a copy for reading (to avoid race conditions)
+                MultiFab shadow_copy(T_surf.boxArray(), T_surf.DistributionMap(), 1, 1);
+                MultiFab::Copy(shadow_copy, *shadow_mask, 0, 0, 1, 1);
+                const Array4<const Real>& shadow_in = shadow_copy.const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    // Only check shaded cells
+                    if (shadow_in(i,j,k) > 0.5) {
+                        // Check 4 orthogonal neighbors (within bounds)
+                        Real neighbor_sum = 0.0;
+                        int neighbor_count = 0;
+
+                        // Check each orthogonal neighbor
+                        if (bx.contains(IntVect(i-1,j,k))) { neighbor_sum += shadow_in(i-1,j,k); neighbor_count++; }
+                        if (bx.contains(IntVect(i+1,j,k))) { neighbor_sum += shadow_in(i+1,j,k); neighbor_count++; }
+                        if (bx.contains(IntVect(i,j-1,k))) { neighbor_sum += shadow_in(i,j-1,k); neighbor_count++; }
+                        if (bx.contains(IntVect(i,j+1,k))) { neighbor_sum += shadow_in(i,j+1,k); neighbor_count++; }
+
+                        // If all neighbors are unshadowed, this is likely a spurious detection
+                        if (neighbor_count >= 3 && neighbor_sum < 0.1) {
+                            shadow_arr(i,j,k) = 0.0;  // Unshade this cell
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    // ========================================================================
+    // PASS 2: Compute energy balance for building surfaces using shadow mask
+    // ========================================================================
 
     // Physical constants
     const Real sigma = 5.67e-8;        // Stefan-Boltzmann [W/m²K⁴]
@@ -170,14 +331,16 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             bool is_building_surface = (roof_mask > 0.0 || south_mask > 0.0 || north_mask > 0.0 ||
                                         east_mask > 0.0 || west_mask > 0.0);
 
-            // ============================================================
-            // PART 1: Compute shadow mask for ALL cells (not just building surfaces)
-            // ============================================================
+            // Skip energy balance if not a building surface
+            if (!is_building_surface) return;
 
-            // Shadow mask via horizon angle method (WRF-style)
-            // Scan surrounding cells in sun direction to find max elevation angle
-            // If any neighbor blocks the sun path, this cell is shaded
+            // Read shadow state from pre-computed shadow mask (Pass 1)
             bool is_shaded = false;
+            if (shadow_arr) {
+                is_shaded = (shadow_arr(i,j,k) > 0.5);
+            }
+
+            // Select velocity components based on surface orientation
             // Roof: u and v (horizontal velocities)
             // North/South walls: u and w (tangential to y-normal wall)
             // East/West walls: v and w (tangential to x-normal wall)
@@ -380,43 +543,43 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
         });
     }
 
-    // ============================================================================
-    // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
-    // ============================================================================
-    if (shadow_mask) {
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
-        for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
-        {
-            const Box& bx = mfi.tilebox();
-            const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
+//     // ============================================================================
+//     // Post-process shadow mask: Remove isolated shaded cells (corner artifacts)
+//     // ============================================================================
+//     if (shadow_mask) {
+// #ifdef _OPENMP
+// #pragma omp parallel if (Gpu::notInLaunchRegion())
+// #endif
+//         for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+//         {
+//             const Box& bx = mfi.tilebox();
+//             const Array4<Real>& shadow_arr = shadow_mask->array(mfi);
 
-            // Create a copy for reading (to avoid race conditions)
-            MultiFab shadow_copy(T_surf.boxArray(), T_surf.DistributionMap(), 1, 1);
-            MultiFab::Copy(shadow_copy, *shadow_mask, 0, 0, 1, 1);
-            const Array4<const Real>& shadow_in = shadow_copy.const_array(mfi);
+//             // Create a copy for reading (to avoid race conditions)
+//             MultiFab shadow_copy(T_surf.boxArray(), T_surf.DistributionMap(), 1, 1);
+//             MultiFab::Copy(shadow_copy, *shadow_mask, 0, 0, 1, 1);
+//             const Array4<const Real>& shadow_in = shadow_copy.const_array(mfi);
 
-            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-            {
-                // Only check shaded cells
-                if (shadow_in(i,j,k) > 0.5) {
-                    // Check 4 orthogonal neighbors (within bounds)
-                    Real neighbor_sum = 0.0;
-                    int neighbor_count = 0;
+//             ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+//             {
+//                 // Only check shaded cells
+//                 if (shadow_in(i,j,k) > 0.5) {
+//                     // Check 4 orthogonal neighbors (within bounds)
+//                     Real neighbor_sum = 0.0;
+//                     int neighbor_count = 0;
 
-                    // Check each orthogonal neighbor
-                    if (bx.contains(IntVect(i-1,j,k))) { neighbor_sum += shadow_in(i-1,j,k); neighbor_count++; }
-                    if (bx.contains(IntVect(i+1,j,k))) { neighbor_sum += shadow_in(i+1,j,k); neighbor_count++; }
-                    if (bx.contains(IntVect(i,j-1,k))) { neighbor_sum += shadow_in(i,j-1,k); neighbor_count++; }
-                    if (bx.contains(IntVect(i,j+1,k))) { neighbor_sum += shadow_in(i,j+1,k); neighbor_count++; }
+//                     // Check each orthogonal neighbor
+//                     if (bx.contains(IntVect(i-1,j,k))) { neighbor_sum += shadow_in(i-1,j,k); neighbor_count++; }
+//                     if (bx.contains(IntVect(i+1,j,k))) { neighbor_sum += shadow_in(i+1,j,k); neighbor_count++; }
+//                     if (bx.contains(IntVect(i,j-1,k))) { neighbor_sum += shadow_in(i,j-1,k); neighbor_count++; }
+//                     if (bx.contains(IntVect(i,j+1,k))) { neighbor_sum += shadow_in(i,j+1,k); neighbor_count++; }
 
-                    // If all neighbors are unshadowed (sum ~= 0), this is likely a spurious detection
-                    if (neighbor_count >= 3 && neighbor_sum < 0.1) {
-                        shadow_arr(i,j,k) = 0.0;  // Unshade this cell
-                    }
-                }
-            });
-        }
-    }
+//                     // If all neighbors are unshadowed (sum ~= 0), this is likely a spurious detection
+//                     if (neighbor_count >= 3 && neighbor_sum < 0.1) {
+//                         shadow_arr(i,j,k) = 0.0;  // Unshade this cell
+//                     }
+//                 }
+//             });
+//         }
+//     }
 }
