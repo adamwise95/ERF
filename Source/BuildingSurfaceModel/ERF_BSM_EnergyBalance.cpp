@@ -622,11 +622,11 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                     lw_in = 0.5 * lw_dn_sky + 0.5 * lw_up_ground;
                 }
 
-                // Apply shadow: zero SW_dn if shaded
-                // Note: This zeros ALL SW (direct + diffuse)
-                // Could be refined to only zero direct component
+                // Apply shadow: zero direct beam, keep diffuse (~15% of total)
+                // On clear days: direct=85%, diffuse=15%
+                // TODO: Use actual direct/diffuse split from radiation model if available
                 if (is_shaded) {
-                    sw_dn = 0.0;
+                    sw_dn = 0.15 * sw_dn;  // Keep diffuse, zero direct
                 }
             }
 
