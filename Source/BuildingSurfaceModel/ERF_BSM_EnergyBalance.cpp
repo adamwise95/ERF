@@ -33,14 +33,10 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
 {
     m_dt = dt_advance;
 
-    // Solve surface energy balance to get updated surface temperature
-    Solve_Surface_Energy_Balance(cons_in, xvel_in, yvel_in, zvel_in,
-                                  rad_fluxes, terrain_blank, z_phys_cc, shadow_mask,
-                                  dx_arr, sun_azimuth_deg, sun_zenith_deg, time);
-
-    // One-time initialization: set subsurface temps from converged surface temps
+    // One-time initialization: set T_surf and subsurface from ambient temperature
+    // BEFORE first energy balance solve, so we start from realistic state
     if (!m_subsurface_initialized) {
-        amrex::Print() << "BSM: Initializing subsurface from converged surface temperatures\n";
+        amrex::Print() << "BSM: Initializing surface and subsurface from ambient temperatures\n";
         MultiFab& T_surf = *m_vars[surf_temp_idx];
         MultiFab& T1 = *m_vars[layer1_temp_idx];
         MultiFab& T2 = *m_vars[layer2_temp_idx];
@@ -53,37 +49,48 @@ BSM_EnergyBalance::Advance_With_State (const int& lev,
         for (MFIter mfi(T_surf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             const Box& bx = mfi.tilebox();
-            const Array4<const Real>& T_surf_arr = T_surf.const_array(mfi);
+            const Array4<const Real>& cons_arr = cons_in.const_array(mfi);
+            const Array4<Real>& T_surf_arr = T_surf.array(mfi);
             const Array4<Real>& T1_arr = T1.array(mfi);
             const Array4<Real>& T2_arr = T2.array(mfi);
             const Array4<Real>& T3_arr = T3.array(mfi);
             const Array4<Real>& T4_arr = T4.array(mfi);
 
-            const Real theta_dir = m_theta_dir;  // Deep interior temp for GPU (300K)
+            const Real theta_dir = m_theta_dir;  // Deep interior temp for GPU
 
-            // Set subsurface with temperature gradient from surface to interior
-            // T1 (near surface) warmest, T4 (deep) coolest (near building interior)
+            // Initialize from ambient potential temperature
             ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
-                Real T_surf = T_surf_arr(i,j,k);
-                Real deltaT = T_surf - theta_dir;
+                // Get ambient potential temperature at this cell
+                Real rho = cons_arr(i,j,k,Rho_comp);
+                Real theta_amb = cons_arr(i,j,k,RhoTheta_comp) / rho;
 
-                // Linear gradient from surface to deep interior
+                // Surface starts at ambient
+                T_surf_arr(i,j,k) = theta_amb;
+
+                // Subsurface: gradient from ambient to interior
+                Real deltaT = theta_amb - theta_dir;
+
                 // Layer 1: closest to surface (warmest)
-                T1_arr(i,j,k) = T_surf - 0.25 * deltaT;
+                T1_arr(i,j,k) = theta_amb - 0.25 * deltaT;
 
                 // Layer 2: intermediate
-                T2_arr(i,j,k) = T_surf - 0.50 * deltaT;
+                T2_arr(i,j,k) = theta_amb - 0.50 * deltaT;
 
                 // Layer 3: cooler
-                T3_arr(i,j,k) = T_surf - 0.75 * deltaT;
+                T3_arr(i,j,k) = theta_amb - 0.75 * deltaT;
 
-                // Layer 4: deepest, near building interior temperature
+                // Layer 4: deepest, at building interior temperature
                 T4_arr(i,j,k) = theta_dir;
             });
         }
         m_subsurface_initialized = true;
     }
+
+    // Solve surface energy balance to get updated surface temperature
+    Solve_Surface_Energy_Balance(cons_in, xvel_in, yvel_in, zvel_in,
+                                  rad_fluxes, terrain_blank, z_phys_cc, shadow_mask,
+                                  dx_arr, sun_azimuth_deg, sun_zenith_deg, time);
 
     // Update subsurface temperatures via thermal diffusion
     AdvanceSubsurface();
