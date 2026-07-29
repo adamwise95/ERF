@@ -602,18 +602,27 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             }
 
             // Get radiation at the height of this building surface cell
-            // Only read SW_dn and LW_dn (atmospheric/solar inputs)
-            // Note: SW_up = albedo * SW_dn (accounted for in R_net calculation)
-            //       LW_up = f(T_surf) (recomputed in Newton iteration below)
+            // Roofs (horizontal): see only sky LW_dn
+            // Walls (vertical): see both sky LW_dn and ground LW_up with ~50/50 view factor
             Real sw_dn = 0.0;
-            Real lw_dn = 0.0;
+            Real lw_in = 0.0;  // Total incoming longwave (from sky and/or ground)
             if (has_radiation) {
                 // Radiation fluxes: component 0=SW_up, 1=SW_dn, 2=LW_up, 3=LW_dn
                 // Use radiation at height k (buildings are resolved in height)
                 sw_dn = rad_arr(i,j,k,1);
-                lw_dn = rad_arr(i,j,k,3);
+                Real lw_dn_sky = rad_arr(i,j,k,3);  // Downwelling from sky/atmosphere
 
-                // Apply shadow: zero SW_dn if shaded (NOW is_shaded is computed!)
+                if (roof_mask > 0.0) {
+                    // Roof (horizontal): sees only sky
+                    lw_in = lw_dn_sky;
+                } else {
+                    // Wall (vertical): sees both sky and ground
+                    // Simple view factor: 50% sky (above), 50% ground (below)
+                    Real lw_up_ground = rad_arr(i,j,0,2);  // Upwelling from ground surface (k=0)
+                    lw_in = 0.5 * lw_dn_sky + 0.5 * lw_up_ground;
+                }
+
+                // Apply shadow: zero SW_dn if shaded
                 // Note: This zeros ALL SW (direct + diffuse)
                 // Could be refined to only zero direct component
                 if (is_shaded) {
@@ -637,7 +646,7 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
             for (int iter = 0; iter < max_iter; ++iter) {
                 // 1. Net radiation
                 Real lw_up = emissivity * sigma * pow(T_surf_new, 4.0);
-                Real R_net = sw_dn * (1.0 - albedo) + lw_dn - lw_up;
+                Real R_net = sw_dn * (1.0 - albedo) + lw_in - lw_up;
 
                 // 2. Sensible heat flux (simplified MOST)
                 // H = rho * Cp * Ch * U * (T_surf - T_air)
