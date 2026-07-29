@@ -683,8 +683,8 @@ BSM_EnergyBalance::Solve_Surface_Energy_Balance(
                            i, j, k, wall_type, is_shaded ? "YES" : "NO");
                     printf("  Iter %d: T_surf=%.2f K (%.2f C), T_ambient=%.2f K (%.2f C)\n",
                            iter, T_surf_new, T_surf_new-273.15, theta_cellaway, theta_cellaway-273.15);
-                    printf("  T1_layer=%.2f K, sw_dn=%.1f W/m2, lw_dn=%.1f W/m2\n",
-                           T1_arr(i,j,k), sw_dn, lw_dn);
+                    printf("  T1_layer=%.2f K, sw_dn=%.1f W/m2, lw_in=%.1f W/m2\n",
+                           T1_arr(i,j,k), sw_dn, lw_in);
                     printf("  R_net=%.1f, H=%.1f, LE=%.1f, G=%.1f, Residual=%.1f W/m2\n",
                            R_net, H, LE, G, residual);
                     printf("  u_tang=%.2f m/s, Ch=%.6f\n", u_tang, Ch);
