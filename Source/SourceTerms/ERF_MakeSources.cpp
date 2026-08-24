@@ -440,7 +440,9 @@ void make_sources (int level,
         // *************************************************************************************
         // 7. Add sponging
         // *************************************************************************************
-        if ( (solverChoice.spongeChoice.sponge_type != SpongeType::None) && is_slow_step) {
+        // Only apply sponge zones at level 0 since refined levels are embedded within
+        // coarser levels and don't represent physical domain boundaries
+        if ( (solverChoice.spongeChoice.sponge_type != SpongeType::None) && is_slow_step && (level == 0)) {
             const int n_qstate = S_data[IntVars::cons].nComp() - (NDRY + NSCALARS);
             ApplySpongeZoneBCsForCC(solverChoice.spongeChoice, geom, bx, cell_src, cell_data, r0, th0, qv0, z_cc_arr, n_qstate);
         }

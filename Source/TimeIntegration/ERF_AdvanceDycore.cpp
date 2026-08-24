@@ -86,7 +86,8 @@ void ERF::advance_dycore (int level,
     Real* d_sinesq_stag_at_lev = (use_rayleigh)  ? d_sinesq_stag_ptrs[level].data() : nullptr;
 
     Vector<Real*> d_sponge_ptrs_at_lev;
-    if (SpongeChoice::sponge_type == SpongeType::Input_Sponge)
+    // Sponge zones are only initialized and applied at level 0
+    if (SpongeChoice::sponge_type == SpongeType::Input_Sponge && level == 0)
     {
         d_sponge_ptrs_at_lev.resize(Sponge::nvars_sponge);
         d_sponge_ptrs_at_lev[Sponge::ubar_sponge]  =  d_sponge_ptrs[level][Sponge::ubar_sponge].data();

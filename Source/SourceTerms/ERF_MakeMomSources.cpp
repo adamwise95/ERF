@@ -16,6 +16,7 @@ using namespace amrex;
 /**
  * Function for computing the slow RHS for the evolution equations for the density, potential temperature and momentum.
  *
+ * @param[in] level AMR level
  * @param[in] time current time
  * @param[in] dt current slow or fast timestep size
  * @param[in]  S_data current solution
@@ -35,7 +36,8 @@ using namespace amrex;
  * @param[in] d_sinesq_stag_at_lev  sin( (pi/2) (z-z_t)/(damping depth)) at z-faces
  */
 
-void make_mom_sources (double time_d,
+void make_mom_sources (int level,
+                       double time_d,
                        double dt,
                        const Vector<MultiFab>& S_data,
                        const MultiFab* z_phys_nd,
@@ -746,7 +748,9 @@ void make_mom_sources (double time_d,
         // *****************************************************************************
         // 7. Add SPONGING
         // *****************************************************************************
-        if (is_slow_step) {
+        // Only apply sponge zones at level 0 since refined levels are embedded within
+        // coarser levels and don't represent physical domain boundaries
+        if (is_slow_step && (level == 0)) {
             if (solverChoice.spongeChoice.sponge_type == SpongeType::Input_Sponge)
             {
                 ApplySpongeZoneBCsForMom_ReadFromFile(solverChoice.spongeChoice, geom, tbx, tby, cell_data,

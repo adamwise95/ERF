@@ -37,7 +37,9 @@ ERF::initSponge ()
     h_sponge_ptrs.resize(max_level+1);
     d_sponge_ptrs.resize(max_level+1);
 
-    for (int lev = 0; lev <= finest_level; lev++)
+    // Only initialize sponge for level 0 since sponge zones are only applied
+    // at the physical domain boundaries (level 0)
+    for (int lev = 0; lev <= 0; lev++)
     {
         // These have 2 components: ubar, vbar
         h_sponge_ptrs[lev].resize(Sponge::nvars_sponge);
@@ -76,7 +78,9 @@ ERF::setSpongeRefFromSounding (bool restarting)
     const Real* V_inp_sponge     = input_sponge_data.V_inp_sponge.dataPtr();
     const int   inp_sponge_size  = input_sponge_data.size();
 
-    for (int lev = 0; lev <= finest_level; lev++)
+    // Only initialize sponge for level 0 since sponge zones are only applied
+    // at the physical domain boundaries (level 0)
+    for (int lev = 0; lev <= 0; lev++)
     {
         const int khi = geom[lev].Domain().bigEnd()[2];
         Vector<Real> zcc(khi+1);
