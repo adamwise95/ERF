@@ -199,8 +199,13 @@ ERF::init_from_input_sounding (int lev)
 
     if (!constant_density_sounding) {
         // Enforce HSE on the base state -- holding th_hse and qv_hse constant
-        bool maintain_Th = true;
-        rebalance_columns(r_hse, th_hse, qv_hse, qv_hse, z_phys_nd[lev].get(), geom[lev], maintain_Th);
+        // Only rebalance at level 0 since rebalance_columns requires tiles to span
+        // the full vertical domain. For lev > 0, base state is interpolated from
+        // coarser level and inherits HSE balance.
+        if (lev == 0) {
+            bool maintain_Th = true;
+            rebalance_columns(r_hse, th_hse, qv_hse, qv_hse, z_phys_nd[lev].get(), geom[lev], maintain_Th);
+        }
 
         // Update rho in the state from base state
         MultiFab::Copy(lev_new[Vars::cons], r_hse, 0, Rho_comp, 1, 1);
