@@ -5,6 +5,7 @@
 #define ERF_SAMPLEDATA_H
 
 #include <memory>
+#include <limits>
 
 #include <AMReX_ParmParse.H>
 #include <AMReX_MultiFab.H>
@@ -811,7 +812,8 @@ struct PlaneSampler
 
     void
     get_sample_data (amrex::Vector<amrex::Geometry>& geom,
-                     amrex::Vector<amrex::Vector<amrex::MultiFab>>& vars_new)
+                     amrex::Vector<amrex::Vector<amrex::MultiFab>>& vars_new,
+                     const amrex::Vector<std::unique_ptr<amrex::MultiFab>>& z_phys_cc = {})
     {
         int nlev   = static_cast<int>(vars_new.size());
         int nplane = static_cast<int>(m_bnd_rbx.size());
@@ -825,18 +827,87 @@ struct PlaneSampler
             int dir = m_dir[iplane];
             amrex::RealBox bnd_rbx  = m_bnd_rbx[iplane];
             amrex::Real point = bnd_rbx.lo(dir);
+            amrex::Real actual_point = point; // Will be updated if we find exact z from z_phys
 
             // Collect every level 0..lev_cap whose grids intersect the plane.
             int lev_cap = (m_max_level >= 0 && m_max_level < nlev-1) ? m_max_level : nlev-1;
             m_ps_mf[iplane].clear();
 
             for (int ilev(0); ilev<=lev_cap; ++ilev) {
+                int k_l = 0;  // k index to sample - moved outside block for later use
 
                 // Stop ascending once a level's grids no longer touch the flattened plane
                 {
                     amrex::Box plane_bx = getIndexBox(bnd_rbx, geom[ilev]);
-                    int k_l = static_cast<int>(std::floor((point - geom[ilev].ProbLo(dir))
+
+                    // If z_phys_cc is available and dir==2 (z-direction), find k by searching z_phys
+                    if (dir == 2 && ilev < static_cast<int>(z_phys_cc.size()) && z_phys_cc[ilev]) {
+                        // Sample z_phys_cc to find the k index closest to the requested height
+                        // Use the first available box (domain may be decomposed across MPI ranks)
+                        amrex::Real min_diff = std::numeric_limits<amrex::Real>::max();
+                        k_l = 0;
+                        bool found = false;
+                        int sample_i = 0, sample_j = 0;
+                        amrex::Real z_terrain = 0.0;
+
+                        for (amrex::MFIter mfi(*z_phys_cc[ilev]); mfi.isValid(); ++mfi) {
+                            const amrex::Box& bx = mfi.validbox();
+                            // Use the center of this box for sampling
+                            sample_i = (bx.smallEnd(0) + bx.bigEnd(0)) / 2;
+                            sample_j = (bx.smallEnd(1) + bx.bigEnd(1)) / 2;
+
+                            auto const& z_arr = z_phys_cc[ilev]->const_array(mfi);
+
+                            // Get terrain height (z at k=0)
+                            z_terrain = z_arr(sample_i, sample_j, bx.smallEnd(2));
+
+                            // Search through all k levels in this box for height AGL (above ground level)
+                            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
+                                amrex::Real z_asl = z_arr(sample_i, sample_j, k);
+                                amrex::Real z_agl = z_asl - z_terrain;  // Height above ground level
+                                amrex::Real diff = std::abs(z_agl - point);
+                                if (diff < min_diff) {
+                                    min_diff = diff;
+                                    k_l = k;
+                                    found = true;
+                                }
+                            }
+
+                            if (found) {
+                                // Get the actual z coordinate at this k level
+                                actual_point = z_arr(sample_i, sample_j, k_l);
+                                break; // Use first box found
+                            }
+                        }
+
+                        if (found) {
+                            amrex::Real z_agl_found = actual_point - z_terrain;
+                            amrex::Print() << "PlaneSampler: plane " << iplane << " (" << m_name[iplane]
+                                           << "), level " << ilev << ", dir=" << dir
+                                           << ", requested height AGL=" << point << " m"
+                                           << ", found closest k=" << k_l
+                                           << " at z_ASL=" << actual_point << " m (z_AGL=" << z_agl_found << " m)"
+                                           << " (terrain=" << z_terrain << " m, diff=" << min_diff << " m)"
+                                           << " using z_phys search at (i,j)=(" << sample_i << "," << sample_j << ")"
+                                           << std::endl;
+                        } else {
+                            amrex::Print() << "PlaneSampler: WARNING - no z_phys_cc data found, falling back to uniform dz" << std::endl;
+                            k_l = static_cast<int>(std::floor((point - geom[ilev].ProbLo(dir))
+                                                              / geom[ilev].CellSize(dir)));
+                        }
+                    } else {
+                        // Fall back to uniform dz calculation
+                        k_l = static_cast<int>(std::floor((point - geom[ilev].ProbLo(dir))
                                                           / geom[ilev].CellSize(dir)));
+                        amrex::Print() << "PlaneSampler: plane " << iplane << " (" << m_name[iplane]
+                                       << "), level " << ilev << ", dir=" << dir
+                                       << ", requested height=" << point
+                                       << " m, k index=" << k_l
+                                       << " (using uniform dz approximation)"
+                                       << ", ProbLo(" << dir << ")=" << geom[ilev].ProbLo(dir)
+                                       << ", CellSize(" << dir << ")=" << geom[ilev].CellSize(dir) << std::endl;
+                    }
+
                     plane_bx.setSmall(dir, k_l); plane_bx.setBig(dir, k_l);
                     if (!vars_new[ilev][Vars::cons].boxArray().intersects(plane_bx)) { break; }
                 }
@@ -987,8 +1058,36 @@ struct PlaneSampler
                     mf_comp += 1;
                 }
 
-                auto slice = get_slice_data(dir, point, mf_cc_data, geom[ilev],
-                                            0, ncomp, interpolate, bnd_rbx);
+                std::unique_ptr<amrex::MultiFab> slice;
+
+                // If we used z_phys search and dir==2, extract directly at k_l
+                // Otherwise fall back to get_slice_data which does its own calculation
+                if (dir == 2 && ilev < static_cast<int>(z_phys_cc.size()) && z_phys_cc[ilev]) {
+                    // Direct extraction at the k level we found
+                    amrex::Box slice_bx = getIndexBox(bnd_rbx, geom[ilev]);
+                    slice_bx.setSmall(dir, k_l);
+                    slice_bx.setBig(dir, k_l);
+
+                    // Build BoxArray from intersection with actual data
+                    amrex::BoxList bl;
+                    for (int ibox = 0; ibox < mf_cc_data.boxArray().size(); ++ibox) {
+                        amrex::Box isect = mf_cc_data.boxArray()[ibox] & slice_bx;
+                        if (isect.ok()) {
+                            bl.push_back(isect);
+                        }
+                    }
+
+                    if (!bl.isEmpty()) {
+                        amrex::BoxArray slice_ba(std::move(bl));
+                        slice = std::make_unique<amrex::MultiFab>(slice_ba, mf_cc_data.DistributionMap(),
+                                                                   ncomp, 0);
+                        amrex::MultiFab::Copy(*slice, mf_cc_data, 0, 0, ncomp, 0);
+                    }
+                } else {
+                    // Fall back to AMReX's get_slice_data for non-z or when z_phys not available
+                    slice = get_slice_data(dir, actual_point, mf_cc_data, geom[ilev],
+                                          0, ncomp, interpolate, bnd_rbx);
+                }
 
                 // Defensive: an empty return means nothing was actually sampled.
                 if (!slice || slice->boxArray().size() == 0) { break; }
@@ -1000,6 +1099,9 @@ struct PlaneSampler
                 const int rr_l    = 1 << ilev;
                 const int k_slice = slice->boxArray().minimalBox().smallEnd(dir);
                 const int l_dir   = dir;
+                amrex::Print() << "PlaneSampler: plane " << iplane << " (" << m_name[iplane]
+                               << "), level " << ilev << ", extracted k_slice=" << k_slice
+                               << " from slice box=" << slice->boxArray().minimalBox() << std::endl;
 
                 amrex::BoxList bl;
                 const amrex::BoxArray& slice_ba = slice->boxArray();
