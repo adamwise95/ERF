@@ -23,6 +23,10 @@ pool_t kokkos_mem_pool;
 
 bool initialized = false;
 
+// Track the maximum nlay and nvar for pool reinitialization with vertical refinement
+size_t pool_max_nlay = 0;
+int pool_nvar = 0;
+
 
 optical_props2_t
 get_cloud_optics_sw (const int ncol,
@@ -256,6 +260,12 @@ rrtmgp_initialize (gas_concs_t& gas_concs_k,
     const size_t nlay = gas_concs_k.nlay;
     auto my_size_ref  = static_cast<unsigned long>(nvar * ncol * nlay * ngpt);
     pool_t::init(my_size_ref);
+    pool_max_nlay = nlay;
+    pool_nvar = nvar;
+
+    amrex::Print() << "RRTMGP: Initialized pool with nlay=" << nlay
+                   << " ncol=" << ncol << " nvar=" << nvar
+                   << " size=" << my_size_ref << std::endl;
 
     // We are now initialized!
     initialized = true;
@@ -402,6 +412,26 @@ rrtmgp_main (const int ncol, const int nlay,
              const RealT tsi_scaling,
              const bool extra_clnclrsky_diag, const bool extra_clnsky_diag)
 {
+    // Check if we need to reinitialize the memory pool for larger nlay
+    // This happens with vertical refinement where fine levels have more vertical cells
+    if (static_cast<size_t>(nlay) > pool_max_nlay) {
+        amrex::Print() << "RRTMGP: Reinitializing pool for nlay=" << nlay
+                       << " (previous max was " << pool_max_nlay << ")" << std::endl;
+
+        // Finalize old pool
+        pool_t::finalize();
+
+        // Reinitialize with new larger size using same nvar from initialization
+        const size_t ngpt = std::max(k_dist_sw_k->get_ngpt(), k_dist_lw_k->get_ngpt());
+        auto my_size_ref = static_cast<unsigned long>(pool_nvar * ncol * nlay * ngpt);
+        pool_t::init(my_size_ref);
+        pool_max_nlay = nlay;
+
+        amrex::Print() << "RRTMGP: Pool reinitialized with ncol=" << ncol
+                       << " nlay=" << nlay << " nvar=" << pool_nvar
+                       << " size=" << my_size_ref << std::endl;
+    }
+
     // Setup pointers to RRTMGP SW fluxes
     fluxes_t fluxes_sw;
     fluxes_sw.flux_up = sw_flux_up;

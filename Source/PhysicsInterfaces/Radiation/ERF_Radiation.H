@@ -98,6 +98,11 @@ public:
         // grow back. It is zero only when m_ncol is zero, and a rank with no columns
         // does no radiation work.
         m_ncol_chunk = amrex::min(m_ncol, m_ncol_chunk_requested);
+
+        amrex::Print() << "Radiation::Init() for level " << m_lev
+                       << " m_nlay=" << m_nlay
+                       << " m_ncol=" << m_ncol << std::endl;
+        alloc_buffers();
     };
 
     virtual
@@ -120,6 +125,12 @@ public:
          amrex::MultiFab* lon_ptr,
          const bool updated_lsm) override
     {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+            m_nlay == geom.Domain().length(2),
+            "Radiation: m_nlay (" + std::to_string(m_nlay) +
+            ") doesn't match domain vertical extent (" +
+            std::to_string(geom.Domain().length(2)) + ")");
+
         set_grids(level, step, time, dt, ba, geom,
                   cons_in, lmask, t_surf,
                   lsm_input_ptrs, qheating_rates,
