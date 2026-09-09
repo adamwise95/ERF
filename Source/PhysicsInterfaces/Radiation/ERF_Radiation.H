@@ -256,12 +256,6 @@ public:
         return m_is_nested_patch;
     }
 
-    // Check if radiation was updated this call
-    bool was_updated () const override
-    {
-        return m_update_rad;
-    }
-
     // Populate datalog structures
     void
     populateDatalogMF ();
