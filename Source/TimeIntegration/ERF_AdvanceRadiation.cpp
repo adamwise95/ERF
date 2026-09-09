@@ -45,5 +45,22 @@ void ERF::advance_radiation (int lev,
                       qheating_rates[lev].get(), rad_fluxes[lev].get(),
                       z_phys_nd[lev].get()     , lat_ptr, lon_ptr,
                       lsm_updated);
+
+        // Fill ghost cells after radiation computes (needed for interpolation to finer levels)
+        // This should be fast since it only fills this level's own ghost cells
+        if (solverChoice.rad_type != RadiationType::None && !rad[lev]->is_nested_patch()) {
+            qheating_rates[lev]->FillBoundary(geom[lev].periodicity());
+        }
+
+        // For nested patches (fine levels that don't reach model top), radiation
+        // was skipped. Interpolate heating rates from parent level.
+        if (lev > 0 && rad[lev]->is_nested_patch()) {
+            InterpFromCoarseLevel(*qheating_rates[lev], qheating_rates[lev]->nGrowVect(),
+                                  IntVect(0,0,0),
+                                  *qheating_rates[lev-1], 0, 0, 2,
+                                  geom[lev-1], geom[lev],
+                                  refRatio(lev-1), &cell_cons_interp,
+                                  domain_bcs_type, BCVars::cons_bc);
+        }
     }
 }

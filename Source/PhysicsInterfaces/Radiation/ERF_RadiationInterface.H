@@ -63,6 +63,22 @@ public:
         return empty;
     }
 
+    // Check if this is a nested patch (doesn't reach model top)
+    virtual
+    bool
+    is_nested_patch () const
+    {
+        return false;  // Default: not a nested patch
+    }
+
+    // Check if radiation was updated this call
+    virtual
+    bool
+    was_updated () const
+    {
+        return false;  // Default: assume not updated
+    }
+
     void
     setupDataLog ()
     {

@@ -67,9 +67,29 @@ public:
           const amrex::BoxArray& ba,
           amrex::MultiFab* cons_in) override
     {
-        // Ensure the boxes span klo -> khi
+        // Check for nested patches: fine levels that don't reach the model top
+        // These need special handling since radiation requires complete atmospheric columns
         int klo = geom.Domain().smallEnd(2);
         int khi = geom.Domain().bigEnd(2);
+
+        // Detect if any box doesn't reach the domain top (nested patch)
+        bool is_nested_patch = false;
+        for (amrex::MFIter mfi(*cons_in); mfi.isValid(); ++mfi) {
+            const amrex::Box& vbx = mfi.validbox();
+            if (vbx.bigEnd(2) < khi) {
+                is_nested_patch = true;
+                break;
+            }
+        }
+
+        // Skip radiation on nested patches - heating rates will be interpolated from coarser level
+        if (is_nested_patch) {
+            m_is_nested_patch = true;
+            amrex::Print() << "Radiation: Level " << m_lev
+                           << " is a nested patch (doesn't reach model top) - "
+                           << "radiation will be skipped, using interpolated heating rates" << std::endl;
+            return;
+        }
 
         // Reset vector of offsets for columnar data
         m_nlay = geom.Domain().length(2);
@@ -79,6 +99,8 @@ public:
         m_col_offsets.resize(int(ba.size()));
         for (amrex::MFIter mfi(*cons_in); mfi.isValid(); ++mfi) {
             const amrex::Box& vbx = mfi.validbox();
+            // This assertion now only triggers for true vertical MPI decomposition,
+            // not for nested patches (which we handle above by skipping radiation)
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE((klo == vbx.smallEnd(2)) &&
                                              (khi == vbx.bigEnd(2)),
                                              "Vertical decomposition with radiation is not allowed.");
@@ -125,6 +147,12 @@ public:
          amrex::MultiFab* lon_ptr,
          const bool updated_lsm) override
     {
+        // Skip radiation computation on nested patches - heating rates will be
+        // filled via interpolation from coarser level in ERF::FillPatch
+        if (m_is_nested_patch) {
+            return;
+        }
+
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
             m_nlay == geom.Domain().length(2),
             "Radiation: m_nlay (" + std::to_string(m_nlay) +
@@ -222,6 +250,18 @@ public:
         return m_lsm_output_names;
     }
 
+    // Check if this is a nested patch (doesn't reach model top)
+    bool is_nested_patch () const override
+    {
+        return m_is_nested_patch;
+    }
+
+    // Check if radiation was updated this call
+    bool was_updated () const override
+    {
+        return m_update_rad;
+    }
+
     // Populate datalog structures
     void
     populateDatalogMF ();
@@ -235,6 +275,9 @@ private:
 
     // Process interface vars from ERF/AMReX
     //===================================================================================
+
+    // True if this level is a nested patch that doesn't reach model top
+    bool m_is_nested_patch = false;
 
     // Grid level
     int m_lev;

@@ -499,7 +499,11 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     //*********************************************************
     if (solverChoice.rad_type != RadiationType::None)
     {
-        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, 0);
+        // Allocate with ghost cells to enable interpolation from coarse level
+        // (needed for nested patches where radiation is skipped)
+        // Use same pattern as z_phys: ComputeGhostCells + extra for interpolation
+        int ngrow_rad = ComputeGhostCells(solverChoice) + 2;
+        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, ngrow_rad);
         rad_fluxes[lev]     = std::make_unique<MultiFab>(ba, dm, 4, 0);
         qheating_rates[lev]->setVal(zero);
         rad_fluxes[lev]->setVal(zero);
