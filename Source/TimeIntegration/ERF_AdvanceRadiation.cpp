@@ -55,12 +55,20 @@ void ERF::advance_radiation (int lev,
         // For nested patches (fine levels that don't reach model top), radiation
         // was skipped. Interpolate heating rates from parent level.
         if (lev > 0 && rad[lev]->is_nested_patch()) {
+            // Ensure parent level's ghost cells are filled before interpolation
+            // This is needed even when radiation doesn't run this step, especially
+            // with two-way coupling where the grid structure may have changed
+            if (!rad[lev-1]->is_nested_patch()) {
+                qheating_rates[lev-1]->FillBoundary(geom[lev-1].periodicity());
+            }
+
             InterpFromCoarseLevel(*qheating_rates[lev], qheating_rates[lev]->nGrowVect(),
                                   IntVect(0,0,0),
                                   *qheating_rates[lev-1], 0, 0, 2,
                                   geom[lev-1], geom[lev],
                                   refRatio(lev-1), &cell_cons_interp,
                                   domain_bcs_type, BCVars::cons_bc);
+
         }
     }
 }
