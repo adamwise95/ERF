@@ -69,6 +69,36 @@ void ERF::advance_radiation (int lev,
                                   refRatio(lev-1), &cell_cons_interp,
                                   domain_bcs_type, BCVars::cons_bc);
 
+            // Also interpolate LSM radiation output fields (surface fluxes needed by NoahMP)
+            // These are 2D surface fields (k=0 only) that may have no ghost cells
+            if (solverChoice.lsm_type != LandSurfaceType::None) {
+                Vector<std::string> lsm_output_names = rad[lev]->get_lsm_output_varnames();
+
+                for (int i = 0; i < lsm_output_names.size(); ++i) {
+                    int varIdx_fine = lsm.Get_DataIdx(lev, lsm_output_names[i]);
+                    int varIdx_coarse = lsm.Get_DataIdx(lev-1, lsm_output_names[i]);
+                    if (varIdx_fine >= 0 && varIdx_coarse >= 0) {
+                        MultiFab* lsm_fine = lsm.Get_Data_Ptr(lev, varIdx_fine);
+                        MultiFab* lsm_coarse = lsm.Get_Data_Ptr(lev-1, varIdx_coarse);
+                        if (lsm_fine && lsm_coarse && lsm_coarse->nComp() > 0) {
+                            // Create temporary coarse MultiFab with 1 ghost cell for safe interpolation
+                            MultiFab tmp_coarse(lsm_coarse->boxArray(), lsm_coarse->DistributionMap(),
+                                                lsm_coarse->nComp(), 1);
+                            MultiFab::Copy(tmp_coarse, *lsm_coarse, 0, 0, lsm_coarse->nComp(), 0);
+                            tmp_coarse.FillBoundary(geom[lev-1].periodicity());
+
+                            // Now interpolate from tmp_coarse (with ghost) to lsm_fine (no ghost needed)
+                            InterpFromCoarseLevel(*lsm_fine, IntVect(0,0,0),
+                                                  IntVect(0,0,0),
+                                                  tmp_coarse, 0, 0, lsm_coarse->nComp(),
+                                                  geom[lev-1], geom[lev],
+                                                  refRatio(lev-1), &cell_cons_interp,
+                                                  domain_bcs_type, BCVars::cons_bc);
+                        }
+                    }
+                }
+            }
+
         }
     }
 }

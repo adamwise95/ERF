@@ -489,11 +489,11 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
 
         //
         // CHOOSE INITIALIZATION PATH:
-        // If interp_atmos_from_coarse is enabled for a finer level created at later time,
+        // If interp_atmos_from_coarse is enabled for a finer level,
         // read only surface fields from wrfinput and interpolate atmospheric state from coarse.
         // Otherwise use the standard path of reading all fields from wrfinput.
         //
-        bool use_surface_only = solverChoice.interp_atmos_from_coarse && (lev > 0) && (time > 0.0);
+        bool use_surface_only = solverChoice.interp_atmos_from_coarse && (lev > 0);
 
         if (solverChoice.init_type == InitType::Metgrid) {
             init_from_metgrid(lev);
@@ -521,6 +521,15 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
             rebuild_base_state_from_wrfinput(lev, base_state[lev]);
             (*physbcs_base[lev])(base_state[lev],0,base_state[lev].nComp(),base_state[lev].nGrowVect());
             FillCoarsePatch(lev, time);
+
+            // Now initialize LSM with the properly filled atmospheric state
+            if (solverChoice.lsm_type != LandSurfaceType::None) {
+                amrex::Print() << "Initializing LSM at level " << lev << " after FillCoarsePatch\n";
+                IntVect RefRatio(1);
+                for (int l = 0; l < lev; ++l) { RefRatio *= refRatio(l); }
+                lsm.Init(lev, vars_new[lev][Vars::cons], Geom(lev), Geom(0),
+                         domain_bcs_type, RefRatio, zero, nc_init_file);
+            }
         }
 
     } else {
@@ -607,7 +616,9 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
     }
 
     //********************************************************************************************
-    // Land Surface Model
+    // Land Surface Model - setup data structures
+    // NOTE: Actual LSM initialization (lsm.Init) is deferred if using interp_atmos_from_coarse
+    //       because it needs valid atmospheric state from FillCoarsePatch
     // *******************************************************************************************
     int lsm_data_size  = lsm.Get_Data_Size();
     int lsm_flux_size  = lsm.Get_Flux_Size();
@@ -616,7 +627,19 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
     lsm_flux[lev].resize(lsm_flux_size);
     lsm_flux_name.resize(lsm_flux_size);
     lsm.Define(lev, solverChoice);
-    if (solverChoice.lsm_type != LandSurfaceType::None) {
+
+    // Check if we'll be using surface-only init (atmospheric state comes later from FillCoarsePatch)
+    bool will_use_surface_only = false;
+#ifdef ERF_USE_NETCDF
+    if (!nc_init_file[lev].empty() &&
+        (solverChoice.init_type == InitType::WRFInput || solverChoice.init_type == InitType::Metgrid)) {
+        will_use_surface_only = solverChoice.interp_atmos_from_coarse;
+    }
+#endif
+
+    // Only initialize LSM now if we're NOT using surface-only init
+    // (for surface-only, LSM init must wait until after FillCoarsePatch provides atmospheric state)
+    if (solverChoice.lsm_type != LandSurfaceType::None && !will_use_surface_only) {
         //
         // A level with no land file of its own takes its LSM state from level 0 rather
         // than from its parent (see NOAHMP::interp_from_lev0, which is handed Geom(0)
