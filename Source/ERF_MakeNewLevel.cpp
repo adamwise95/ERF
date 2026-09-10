@@ -486,16 +486,42 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
         vars_new[lev][Vars::zvel].setVal(0.0); vars_old[lev][Vars::zvel].setVal(0.0);
 
         AMREX_ALWAYS_ASSERT(solverChoice.terrain_type == TerrainType::StaticFittedMesh);
+
+        //
+        // CHOOSE INITIALIZATION PATH:
+        // If interp_atmos_from_coarse is enabled for a finer level created at later time,
+        // read only surface fields from wrfinput and interpolate atmospheric state from coarse.
+        // Otherwise use the standard path of reading all fields from wrfinput.
+        //
+        bool use_surface_only = solverChoice.interp_atmos_from_coarse && (lev > 0) && (time > 0.0);
+
         if (solverChoice.init_type == InitType::Metgrid) {
             init_from_metgrid(lev);
         } else if (solverChoice.init_type == InitType::WRFInput) {
-            init_from_wrfinput(lev, *mf_PSFC[lev]);
+            if (use_surface_only) {
+                amrex::Print() << "Using interp_atmos_from_coarse mode at level " << lev << ":\n";
+                amrex::Print() << "  - Reading surface fields from wrfinput\n";
+                amrex::Print() << "  - Atmospheric state will be interpolated from level " << lev-1 << "\n";
+                init_from_wrfinput_surface_only(lev, *mf_PSFC[lev]);
+            } else {
+                init_from_wrfinput(lev, *mf_PSFC[lev]);
+            }
         }
         init_zphys(lev, time);
         update_terrain_arrays(lev);
         make_physbcs(lev);
 
         dz_min[lev] = (*detJ_cc[lev]).min(0) * geom[lev].CellSize(2);
+
+        //
+        // If we used surface-only init, we need to rebuild the base state and
+        // interpolate the atmospheric state from coarse (just like a level with no init file)
+        //
+        if (use_surface_only) {
+            rebuild_base_state_from_wrfinput(lev, base_state[lev]);
+            (*physbcs_base[lev])(base_state[lev],0,base_state[lev].nComp(),base_state[lev].nGrowVect());
+            FillCoarsePatch(lev, time);
+        }
 
     } else {
 #endif
