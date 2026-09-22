@@ -1092,23 +1092,27 @@ struct PlaneSampler
                 // Defensive: an empty return means nothing was actually sampled.
                 if (!slice || slice->boxArray().size() == 0) { break; }
 
-                // Broadcast the single sampled plane across 2^ilev cells in dir so
-                // every level shares an isotropic refinement ratio. The dir extent
-                // becomes [0, 2^ilev-1]; each cell holds the interpolated plane value
-                // replicated across the shared level-0 slab thickness.
-                const int rr_l    = 1 << ilev;
+                // Compute the cumulative refinement ratio in the sampling direction
+                // from level 0 to level ilev. For anisotropic refinement (e.g. 7 7 2),
+                // we need the product of refinement ratios in the dir dimension.
+                int rr_l_in_dir = 1;
+                for (int lev_tmp = 0; lev_tmp < ilev; lev_tmp++) {
+                    rr_l_in_dir *= geom[lev_tmp+1].Domain().length(dir) / geom[lev_tmp].Domain().length(dir);
+                }
+
                 const int k_slice = slice->boxArray().minimalBox().smallEnd(dir);
                 const int l_dir   = dir;
                 amrex::Print() << "PlaneSampler: plane " << iplane << " (" << m_name[iplane]
                                << "), level " << ilev << ", extracted k_slice=" << k_slice
-                               << " from slice box=" << slice->boxArray().minimalBox() << std::endl;
+                               << " from slice box=" << slice->boxArray().minimalBox()
+                               << ", refinement in dir=" << dir << " is " << rr_l_in_dir << std::endl;
 
                 amrex::BoxList bl;
                 const amrex::BoxArray& slice_ba = slice->boxArray();
                 for (int ib(0); ib<static_cast<int>(slice_ba.size()); ++ib) {
                     amrex::Box b = slice_ba[ib];
                     b.setSmall(dir, 0);
-                    b.setBig(dir, rr_l - 1);
+                    b.setBig(dir, rr_l_in_dir - 1);
                     bl.push_back(b);
                 }
                 amrex::BoxArray out_ba(std::move(bl));
@@ -1141,7 +1145,6 @@ struct PlaneSampler
                        amrex::Vector<amrex::IntVect>& ref_ratio,
                        amrex::Vector<amrex::Geometry>& geom)
     {
-        amrex::ignore_unused(ref_ratio);
         int nplane = m_ps_mf.size();
         for (int iplane(0); iplane<nplane; ++iplane) {
             int nlev_c = static_cast<int>(m_ps_mf[iplane].size());
@@ -1162,31 +1165,42 @@ struct PlaneSampler
             amrex::Vector<int> is_per(AMREX_SPACEDIM,0);
             for (int d(0); d<AMREX_SPACEDIM; ++d) { is_per[d] = geom[0].isPeriodic(d); }
 
-            // Build the index chain by refining the level-0 plane box so that
-            // Domain_l == refine(Domain_{l-1},2) holds exactly in every axis.
+            // Build the index chain using actual refinement ratios from the simulation
             amrex::Box B0 = getIndexBox(bnd_rbx, geom[0]);
 
             amrex::Vector<const amrex::MultiFab*> mf(nlev_c);
             amrex::Vector<amrex::Geometry>        m_geom(nlev_c);
             amrex::Vector<int>                    m_level_steps(nlev_c);
-            amrex::Vector<amrex::IntVect>         m_ref_ratio(nlev_c-1, amrex::IntVect(2));
+            amrex::Vector<amrex::IntVect>         m_ref_ratio(nlev_c-1);
+
+            // Copy actual refinement ratios from simulation
+            for (int l = 0; l < nlev_c-1; ++l) {
+                if (l < static_cast<int>(ref_ratio.size())) {
+                    m_ref_ratio[l] = ref_ratio[l];
+                } else {
+                    // Fallback: compute from geometry
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+                        m_ref_ratio[l][d] = geom[l+1].Domain().length(d) / geom[l].Domain().length(d);
+                    }
+                }
+            }
 
             for (int l(0); l<nlev_c; ++l) {
-                const int rr_l = 1 << l;
-
-                // The nested plane plotfile stores a single scalar refinement
-                // ratio per level, so multi-level output requires factor-2
-                // isotropic refinement.
-                for (int d(0); d<AMREX_SPACEDIM; ++d) {
-                    amrex::Real ratio = geom[0].CellSize(d) / geom[l].CellSize(d);
-                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-                        std::abs(ratio - static_cast<amrex::Real>(rr_l)) < amrex::Real(1.e-6) * rr_l,
-                        "PlaneSampler multi-level output requires factor-2 isotropic refinement (amr.ref_ratio = 2 2 2)");
+                // Compute cumulative refinement ratio in the sampling direction
+                int rr_l_in_dir = 1;
+                for (int lev_tmp = 0; lev_tmp < l; lev_tmp++) {
+                    rr_l_in_dir *= geom[lev_tmp+1].Domain().length(dir) / geom[lev_tmp].Domain().length(dir);
                 }
 
-                amrex::Box domain_l = amrex::refine(B0, rr_l);
+                // Compute the refinement IntVect for this level relative to level 0
+                amrex::IntVect rr_cumulative(1, 1, 1);
+                for (int lev_tmp = 0; lev_tmp < l; lev_tmp++) {
+                    rr_cumulative *= m_ref_ratio[lev_tmp];
+                }
+
+                amrex::Box domain_l = amrex::refine(B0, rr_cumulative);
                 domain_l.setSmall(dir, 0);
-                domain_l.setBig(dir, rr_l - 1);
+                domain_l.setBig(dir, rr_l_in_dir - 1);
 
                 mf[l] = m_ps_mf[iplane][l].get();
                 m_geom[l].define(domain_l, &shared_rbx, geom[l].Coord(), is_per.data());
