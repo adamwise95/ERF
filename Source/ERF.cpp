@@ -2046,7 +2046,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         InterpFromCoarseLevel(*lon_m[lev], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
                               *lon_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
-                              refRatio(lev-1), &cell_cons_interp,
+                              rr2d, &cell_cons_interp,
                               domain_bcs_type, BCVars::cons_bc);
     }
     if (lat_m[lev-1] && !lat_m[lev]) {
@@ -2055,7 +2055,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         InterpFromCoarseLevel(*lat_m[lev], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
                               *lat_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
-                              refRatio(lev-1), &cell_cons_interp,
+                              rr2d, &cell_cons_interp,
                               domain_bcs_type, BCVars::cons_bc);
     }
     //
@@ -2078,7 +2078,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         InterpFromCoarseLevel(*sinPhi_m[lev], ngv, ngv, // DO fill ghost cells outside the domain
                               *sinPhi_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
-                              refRatio(lev-1), &cell_cons_interp,
+                              rr2d, &cell_cons_interp,
                               domain_bcs_type, BCVars::cons_bc);
     }
     if (cosPhi_m[lev-1] && !cosPhi_m[lev]) {
@@ -2087,7 +2087,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         InterpFromCoarseLevel(*cosPhi_m[lev], ngv, ngv, // DO fill ghost cells outside the domain
                               *cosPhi_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
-                              refRatio(lev-1), &cell_cons_interp,
+                              rr2d, &cell_cons_interp,
                               domain_bcs_type, BCVars::cons_bc);
     }
     if (sst_lev[lev-1][0]) {
@@ -2116,7 +2116,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
                 InterpFromCoarseLevel(*sst_lev[lev][n], ngv, ngv,
                                       *sst_lev[lev-1][n], 0, 0, 1,
                                       geom[lev-1], geom[lev],
-                                      refRatio(lev-1), &cell_cons_interp,
+                                      rr2d, &cell_cons_interp,
                                       domain_bcs_type, BCVars::cons_bc);
             }
         }
@@ -2162,7 +2162,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         FillPatchTwoLevels(*lat_m[lev].get(), ngv, IntVect(0,0,0),
                            time_for_fp, cmf, ctime, fmf, ftime,
                            0, 0, 1, geom[lev-1], geom[lev],
-                           refRatio(lev-1), mapper, domain_bcs_type,
+                           rr2d, mapper, domain_bcs_type,
                            BCVars::cons_bc);
     }
     if (lon_m[lev]) {
@@ -2174,7 +2174,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         FillPatchTwoLevels(*lon_m[lev].get(), ngv, IntVect(0,0,0),
                            time_for_fp, cmf, ctime, fmf, ftime,
                            0, 0, 1, geom[lev-1], geom[lev],
-                           refRatio(lev-1), mapper, domain_bcs_type,
+                           rr2d, mapper, domain_bcs_type,
                            BCVars::cons_bc);
     } // lon_m
     if (sinPhi_m[lev]) {
@@ -2186,7 +2186,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         FillPatchTwoLevels(*sinPhi_m[lev].get(), ngv, IntVect(0,0,0),
                            time_for_fp, cmf, ctime, fmf, ftime,
                            0, 0, 1, geom[lev-1], geom[lev],
-                           refRatio(lev-1), mapper, domain_bcs_type,
+                           rr2d, mapper, domain_bcs_type,
                            BCVars::cons_bc);
     } // sinPhi
     if (cosPhi_m[lev]) {
@@ -2198,7 +2198,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         FillPatchTwoLevels(*cosPhi_m[lev].get(), ngv, IntVect(0,0,0),
                            time_for_fp, cmf, ctime, fmf, ftime,
                            0, 0, 1, geom[lev-1], geom[lev],
-                           refRatio(lev-1), mapper, domain_bcs_type,
+                           rr2d, mapper, domain_bcs_type,
                            BCVars::cons_bc);
     } // cosPhi
     if (sst_lev[lev][0]) {
@@ -2221,7 +2221,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
             FillPatchTwoLevels(*sst_lev[lev][n].get(), ngv, IntVect(0,0,0),
                                time_for_fp, cmf, ctime, fmf, ftime,
                                0, 0, 1, geom[lev-1], geom[lev],
-                               refRatio(lev-1), mapper, domain_bcs_type,
+                               rr2d, mapper, domain_bcs_type,
                                BCVars::cons_bc);
         } // ntimes
     } // sst_lev
@@ -2245,7 +2245,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
             FillPatchTwoLevels(*tsk_lev[lev][n].get(), ngv, IntVect(0,0,0),
                                time_for_fp, cmf, ctime, fmf, ftime,
                                0, 0, 1, geom[lev-1], geom[lev],
-                               refRatio(lev-1), mapper, domain_bcs_type,
+                               rr2d, mapper, domain_bcs_type,
                                BCVars::cons_bc);
         } // ntimes
     } // tsk_lev
