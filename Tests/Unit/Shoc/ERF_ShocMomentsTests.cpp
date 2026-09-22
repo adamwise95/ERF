@@ -1,4 +1,5 @@
 #include "ERF_ShocMoments.H"
+#include "ERF_Constants.H"
 #include "ERF_ShocStructure.H"
 #include "ERF_ShocTKE.H"
 #include "ERF_ShocTestUtils.H"
@@ -66,16 +67,27 @@ TEST(ShocMoments, SurfaceMomentBoundaryConditionsMatchTranslatedE3smSemantics)
         ShocStructure::diagnose_pblh(col);
         ShocStructure::diagnose_length_and_brunt(col, opts, 400.0, 400.0);
         ShocTKE::diagnose_tke_and_diffusivities(col, opts, 300.0);
+        // The kernels above may still be in flight; without this the host write
+        // below is overwritten and the moments come out of the diagnosed pblh.
+        shoc_test::sync();
         col.pblh.array()(0,0,0) = 400.0;
         ShocMoments::diagnose_second_moments(col, opts);
     });
 
-    const amrex::Real ustar2 = std::sqrt(0.04 * 0.04 + 0.03 * 0.03);
-    const amrex::Real wstar = std::cbrt((CONST_GRAV / 300.0) * 0.02 * 400.0);
-    const amrex::Real uf = amrex::max(amrex::Real(0.01), std::sqrt(ustar2 + amrex::Real(0.3) * wstar * wstar));
-    const amrex::Real expected_thl_sec = 0.72 * std::pow(0.02 / uf, 2);
-    const amrex::Real expected_qw_sec = 0.72 * std::pow(1.0e-4 / uf, 2);
-    const amrex::Real expected_qwthl = 0.36 * (0.02 / uf) * (1.0e-4 / uf);
+    const amrex::Real ustar2 = std::sqrt(amrex::Real(0.04) * amrex::Real(0.04) +
+                                         amrex::Real(0.03) * amrex::Real(0.03));
+    const amrex::Real wstar = std::cbrt((CONST_GRAV / amrex::Real(300.0)) *
+                                        amrex::Real(0.02) * amrex::Real(400.0));
+    const amrex::Real uf = amrex::max(
+        amrex::Real(0.01),
+        std::sqrt(ustar2 + amrex::Real(0.3) * wstar * wstar));
+    const amrex::Real expected_thl_sec = amrex::Real(0.72) *
+                                         std::pow(amrex::Real(0.02) / uf, 2);
+    const amrex::Real expected_qw_sec = amrex::Real(0.72) *
+                                        std::pow(amrex::Real(1.0e-4) / uf, 2);
+    const amrex::Real expected_qwthl = amrex::Real(0.36) *
+                                       (amrex::Real(0.02) / uf) *
+                                       (amrex::Real(1.0e-4) / uf);
     const amrex::Real expected_wtke = std::pow(amrex::max(std::sqrt(ustar2), amrex::Real(0.01)), 3);
 
     const auto thl_sec = col.thl_sec.const_array();
@@ -83,10 +95,18 @@ TEST(ShocMoments, SurfaceMomentBoundaryConditionsMatchTranslatedE3smSemantics)
     const auto qwthl = col.qwthl_sec.const_array();
     const auto wtke = col.wtke_sec.const_array();
 
-    EXPECT_NEAR(thl_sec(0,0,0), expected_thl_sec, 1.0e-12);
-    EXPECT_NEAR(qw_sec(0,0,0), expected_qw_sec, 1.0e-12);
-    EXPECT_NEAR(qwthl(0,0,0), expected_qwthl, 1.0e-12);
-    EXPECT_NEAR(wtke(0,0,0), expected_wtke, 1.0e-12);
+    EXPECT_NEAR(thl_sec(0,0,0), expected_thl_sec,
+                shoc_test::precision_scaled_tolerance(amrex::Real(1.0e-12),
+                                                       expected_thl_sec, 4));
+    EXPECT_NEAR(qw_sec(0,0,0), expected_qw_sec,
+                shoc_test::precision_scaled_tolerance(amrex::Real(1.0e-12),
+                                                       expected_qw_sec, 4));
+    EXPECT_NEAR(qwthl(0,0,0), expected_qwthl,
+                shoc_test::precision_scaled_tolerance(amrex::Real(1.0e-12),
+                                                       expected_qwthl, 4));
+    EXPECT_NEAR(wtke(0,0,0), expected_wtke,
+                shoc_test::precision_scaled_tolerance(amrex::Real(1.0e-12),
+                                                       expected_wtke, 4));
 }
 
 TEST(ShocMoments, TopTaperDampsUpperMomentDiagnosticsOnly)
@@ -248,13 +268,17 @@ TEST(ShocMoments, OnePointFiveTkeModeZerosVarianceAndThirdMoment)
     }
 }
 
-TEST(ShocMoments, ThirdMomentClippingUsesPositiveFallback)
+TEST(ShocMoments, ThirdMomentClippingLimitsMagnitudeAndKeepsSign)
 {
     auto col = shoc_test::make_column(5);
     const amrex::Box iface_box(amrex::IntVect(0,0,0), amrex::IntVect(col.layout.ncell - 1, col.layout.nlev, 0));
     amrex::FArrayBox w_sec_zi(iface_box, 1, shoc_test::test_arena());
     amrex::FArrayBox w3(iface_box, 1, shoc_test::test_arena());
-    shoc::set_fab_val(w_sec_zi, 0.1, shoc::InitRunOn::Host);
+
+    const amrex::Real w_sec_val = 0.1;
+    const amrex::Real clip_cond = 1.2 * std::sqrt(2.0 * w_sec_val * w_sec_val * w_sec_val);
+
+    shoc::set_fab_val(w_sec_zi, w_sec_val, shoc::InitRunOn::Host);
     shoc::set_fab_val(w3, -10.0, shoc::InitRunOn::Host);
 
     shoc_test::run_and_sync([&] {
@@ -262,7 +286,59 @@ TEST(ShocMoments, ThirdMomentClippingUsesPositiveFallback)
     });
 
     for (int k = 0; k <= col.layout.nlev; ++k) {
-        EXPECT_DOUBLE_EQ(w3.const_array()(0,k,0), 0.02);
+        EXPECT_DOUBLE_EQ(w3.const_array()(0,k,0), -clip_cond);
+    }
+
+    shoc::set_fab_val(w3, 10.0, shoc::InitRunOn::Host);
+
+    shoc_test::run_and_sync([&] {
+        ShocMoments::clip_third_moments(col, w_sec_zi, w3);
+    });
+
+    for (int k = 0; k <= col.layout.nlev; ++k) {
+        EXPECT_DOUBLE_EQ(w3.const_array()(0,k,0), clip_cond);
+    }
+}
+
+TEST(ShocMoments, ThirdMomentClippingLeavesInRangeValuesAlone)
+{
+    auto col = shoc_test::make_column(5);
+    const amrex::Box iface_box(amrex::IntVect(0,0,0), amrex::IntVect(col.layout.ncell - 1, col.layout.nlev, 0));
+    amrex::FArrayBox w_sec_zi(iface_box, 1, shoc_test::test_arena());
+    amrex::FArrayBox w3(iface_box, 1, shoc_test::test_arena());
+
+    const amrex::Real w_sec_val = 0.1;
+    const amrex::Real clip_cond = 1.2 * std::sqrt(2.0 * w_sec_val * w_sec_val * w_sec_val);
+    const amrex::Real w3_val = -0.5 * clip_cond;
+
+    shoc::set_fab_val(w_sec_zi, w_sec_val, shoc::InitRunOn::Host);
+    shoc::set_fab_val(w3, w3_val, shoc::InitRunOn::Host);
+
+    shoc_test::run_and_sync([&] {
+        ShocMoments::clip_third_moments(col, w_sec_zi, w3);
+    });
+
+    for (int k = 0; k <= col.layout.nlev; ++k) {
+        EXPECT_DOUBLE_EQ(w3.const_array()(0,k,0), w3_val);
+    }
+}
+
+TEST(ShocMoments, ThirdMomentClippingZeroesQuiescentLevels)
+{
+    auto col = shoc_test::make_column(5);
+    const amrex::Box iface_box(amrex::IntVect(0,0,0), amrex::IntVect(col.layout.ncell - 1, col.layout.nlev, 0));
+    amrex::FArrayBox w_sec_zi(iface_box, 1, shoc_test::test_arena());
+    amrex::FArrayBox w3(iface_box, 1, shoc_test::test_arena());
+
+    shoc::set_fab_val(w_sec_zi, 0.0, shoc::InitRunOn::Host);
+    shoc::set_fab_val(w3, 1.0, shoc::InitRunOn::Host);
+
+    shoc_test::run_and_sync([&] {
+        ShocMoments::clip_third_moments(col, w_sec_zi, w3);
+    });
+
+    for (int k = 0; k <= col.layout.nlev; ++k) {
+        EXPECT_DOUBLE_EQ(w3.const_array()(0,k,0), 0.0);
     }
 }
 

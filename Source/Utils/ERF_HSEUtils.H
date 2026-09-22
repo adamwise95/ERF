@@ -1,6 +1,8 @@
 #ifndef ERF_HSEUTIL_H_
 #define ERF_HSEUTIL_H_
 
+#include <AMReX_Math.H>
+
 #include "ERF_MicrophysicsUtils.H"
 #include "ERF_Constants.H"
 #include "ERF_EOS.H"
@@ -59,12 +61,12 @@ namespace HSEutils
         // convergence test below evaluate to false on the very first pass, so we
         // would silently return the initial guess and leave, e.g., an all-zero
         // base state.  Trap that here rather than propagating it downstream.
-        if (!(P > amrex::Real(0)) || !(rd > amrex::Real(0)) || !std::isfinite(F)) {
+        if (!(P > amrex::Real(0)) || !(rd > amrex::Real(0)) || !amrex::Math::isfinite(F)) {
             AMREX_DEVICE_PRINTF("ERROR: HSE Newton started from an invalid state: P = %e, rd = %e, F = %e\n",
                                 double(P), double(rd), double(F));
             AMREX_DEVICE_PRINTF("       Check the surface pressure/temperature used to seed the integration%s\n", "");
         }
-        AMREX_ALWAYS_ASSERT(P > amrex::Real(0) && rd > amrex::Real(0) && std::isfinite(F));
+        AMREX_ALWAYS_ASSERT(P > amrex::Real(0) && rd > amrex::Real(0) && amrex::Math::isfinite(F));
 
         int iter=0;
         int max_iter=20;
@@ -677,8 +679,12 @@ init_isentropic_hse_no_terrain(Real *theta, Real* r, Real* p, Real *q_v,
                                const Real eq_pot_temp, const bool use_empirical,
                                const bool T_from_theta = false,
                                const Real z_tr_1 = -one, const Real z_tr_2 = -one,
-                               const Real theta_0 = amrex::Real(0), const Real theta_tr = amrex::Real(0), const Real T_tr = amrex::Real(0))
+                               const Real theta_0 = amrex::Real(300), const Real theta_tr = amrex::Real(300), const Real T_tr = amrex::Real(300))
 {
+    // theta_0, theta_tr and T_tr are used only when T_from_theta is set. Their
+    // defaults are still physical temperatures: compute_theta is inlined into
+    // the Newton loops and optimised builds evaluate its arm speculatively, so
+    // zeros would raise an FPE (g/(Cp_d*0), then 0*exp(inf)) on a discarded value.
     Real T_b, T_dp;
 
     int which_zone = -1;

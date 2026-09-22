@@ -7,6 +7,7 @@
 */
 
 #include <memory>
+#include "ERF_Constants.H"
 
 #include "ERF_EOS.H"
 #include "ERF.H"
@@ -368,6 +369,10 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
 {
     BL_PROFILE("ERF::post_timestep()");
 
+    // nstep is the 0-based index of the step just completed; the balance
+    // reports by the number of completed steps, the plotfiles' numbering.
+    ibseb_report(nstep + 1, time);
+
     if (cloud_chamber_budget) {
         cloud_chamber_budget->report(
             nstep + 1, time, vars_new[0][Vars::cons], geom[0],
@@ -465,7 +470,7 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
         }
     }
 
-    if (solverChoice.rad_type != RadiationType::None)
+    if (solverChoice.rad_uses_interface())
     {
         if ( rad_datalog_int > 0 &&
              (((nstep+1) % rad_datalog_int == 0) || (nstep==0)) ) {
@@ -655,6 +660,9 @@ ERF::InitData_post ()
     if (!restart_chkfile.empty()) {
         restart();
     }
+
+    // Faces of the resolved buildings, from the blanking both paths have built.
+    init_ibseb();
 
     // Select 2-D variables after the active LSM has initialized its runtime
     // field inventory, including provider-specific soil layers.
@@ -854,7 +862,7 @@ ERF::InitData_post ()
 
                 update_sst_tsk(itime, geom[lev], ba2d[lev],
                                sst_lev[lev], tsk_lev[lev],
-                               m_SurfaceLayer, low_data_zlo,
+                               m_SurfaceLayer[Orientation(Direction::z, Orientation::low)], low_data_zlo,
                                vars_new[lev][Vars::cons], *mf_PSFC[lev],
                                solverChoice.rdOcp, lmask_lev[lev][0], use_moist);
             } // itime
@@ -1234,134 +1242,198 @@ ERF::InitData_post ()
     // Configure SurfaceLayer params if used
     // NOTE: we must set up the MOST routine after calling FillPatch
     //       in order to have lateral ghost cells filled (MOST + terrain interp).
-    if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer)
-    {
-        bool has_diff = ( (solverChoice.diffChoice.molec_diff_type != MolecDiffType::None) ||
-                          (solverChoice.turbChoice[0].les_type  != LESType::None)          ||
-                          (solverChoice.turbChoice[0].rans_type != RANSType::None)         ||
-                          (solverChoice.turbChoice[0].pbl_type  != PBLType::None) );
-        AMREX_ALWAYS_ASSERT(has_diff);
+    bool updated_prim = false;
+    // Count number of surface layer boundaries to determine correct parser prefix
+    int n_faces = 0;
+    amrex::GpuArray<int, AMREX_SPACEDIM*2> surface_layer_faces{};
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            n_faces += 1;
+            surface_layer_faces[static_cast<int>(ori)] = 1;
+        }
+    }
 
-        bool rotate = solverChoice.use_rotate_surface_flux;
-        if (rotate) {
-            Print() << "Using surface layer model with stress rotations" << std::endl;
+    // With multiple surface-layer faces, face-qualified prefixes are normally
+    // required.  Preserve the historical unqualified zlo inputs when a user adds
+    // another surface-layer face.  What the user actually wrote is read from the
+    // snapshot taken in ReadParameters; see has_surface_layer_inputs for why the
+    // live ParmParse table cannot be asked this question here.
+    bool use_legacy_zlo_prefix = false;
+    if (n_faces > 1 &&
+        phys_bc_type[Orientation::zlo()] == ERF_BC::surface_layer) {
+        const bool has_legacy_inputs = has_surface_layer_inputs(pp_prefix);
+        const bool has_zlo_inputs = has_surface_layer_inputs(
+            pp_prefix + "." + BoundaryFaceName[Orientation::zlo()]);
+
+        if (has_legacy_inputs && has_zlo_inputs) {
+            Abort("Both legacy unqualified and zlo-qualified surface-layer inputs "
+                  "are present. Use only erf.zlo.most.* and/or "
+                  "erf.zlo.surface_layer.* when multiple surface-layer faces "
+                  "are enabled.");
         }
 
-        //
-        // This constructor will make the SurfaceLayer object but not allocate the arrays at each level.
-        //
-        // Build vector of eb pointers for all levels
-        amrex::Vector<const eb_*> eb_ptrs;
-        eb_ptrs.resize(finest_level + 1, nullptr);
-        if (solverChoice.terrain_type == TerrainType::EB) {
-            for (int lev = 0; lev <= finest_level; lev++) {
-                eb_ptrs[lev] = eb[lev] ? eb[lev].get() : nullptr;
+        if (has_legacy_inputs) {
+            use_legacy_zlo_prefix = true;
+            Warning("Multiple surface-layer faces are enabled while using legacy "
+                    "unqualified surface-layer inputs. Applying erf.most.* and "
+                    "erf.surface_layer.* to zlo; migrate them to erf.zlo.most.* "
+                    "and erf.zlo.surface_layer.*.");
+        }
+    }
+
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            bool has_diff = ( (solverChoice.diffChoice.molec_diff_type != MolecDiffType::None) ||
+                              (solverChoice.turbChoice[0].les_type  != LESType::None)          ||
+                              (solverChoice.turbChoice[0].rans_type != RANSType::None)         ||
+                              (solverChoice.turbChoice[0].pbl_type  != PBLType::None) );
+            AMREX_ALWAYS_ASSERT(has_diff);
+
+            bool rotate = solverChoice.use_rotate_surface_flux;
+            if (rotate) {
+                Print() << "Using surface layer model with stress rotations" << std::endl;
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low,
+                                                 "Surface layer with stress rotations can only be enabled for the bottom z face");
             }
-        }
 
-        m_SurfaceLayer = std::make_unique<SurfaceLayer>(geom, rotate, pp_prefix, Qv_prim,
-                                                        z_phys_nd,
-                                                        solverChoice.mesh_type,
-                                                        solverChoice.terrain_type,
-                                                        solverChoice.turbChoice[finest_level],
-#ifdef ERF_USE_NETCDF
-                                                        start_low_time, final_low_time, low_time_interval,
-#else
-                                                        zero, zero, zero,
-#endif
-                                                        eb_ptrs);
-
-        // Must precede make_SurfaceLayer_at_level: coupled SST is one of the
-        // conditions that selects ThetaCalcType::SURFACE_TEMPERATURE there.
-        m_SurfaceLayer->set_coupled_sst_active(solverChoice.use_coupled_sst);
-
-        // This call will allocate the arrays at each level. If we regrid later, either changing
-        // the number of levels or just the grids at each existing level, we will call an update routine
-        // to redefine the internal arrays in m_SurfaceLayer.
-        for (int lev = 0; lev <= finest_level; lev++)
-        {
-            Vector<MultiFab*> mfv_old = {&vars_old[lev][Vars::cons], &vars_old[lev][Vars::xvel],
-                                         &vars_old[lev][Vars::yvel], &vars_old[lev][Vars::zvel]};
-            m_SurfaceLayer->make_SurfaceLayer_at_level(lev,finest_level+1,
-                                                       mfv_old, Theta_prim[lev], Qv_prim[lev],
-                                                       Qr_prim[lev], z_phys_nd[lev],
-                                                       Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
-                                                       lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
-                                                       sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
-        }
-
-        // If initializing from an input_sounding, make sure the surface layer
-        // is using the same surface conditions
-        if (solverChoice.init_type == InitType::Input_Sounding) {
-            const Real theta0 = input_sounding_data.theta_ref_inp_sound;
-            const Real qv0    = input_sounding_data.qv_ref_inp_sound;
-            for (int lev = 0; lev <= finest_level; lev++) {
-                m_SurfaceLayer->set_t_surf(lev, theta0);
-                m_SurfaceLayer->set_q_surf(lev, qv0);
-            }
-        }
-
-        if (restart_chkfile != "") {
-            // Update surface fields if needed (and available)
-            ReadCheckpointFileSurfaceLayer();
-        }
-
-        // We now configure ABLMost params here so that we can print the averages at t=0
-        // Note we don't fill ghost cells here because this is just for diagnostics
-        for (int lev = 0; lev <= finest_level; ++lev)
-        {
-            IntVect ng = Theta_prim[lev]->nGrowVect();
-
-            MultiFab::Copy(  *Theta_prim[lev], vars_new[lev][Vars::cons], RhoTheta_comp, 0, 1, ng);
-            MultiFab::Divide(*Theta_prim[lev], vars_new[lev][Vars::cons],      Rho_comp, 0, 1, ng);
-
-            if (solverChoice.moisture_type != MoistureType::None) {
-                ng = Qv_prim[lev]->nGrowVect();
-
-                MultiFab::Copy(  *Qv_prim[lev], vars_new[lev][Vars::cons], RhoQ1_comp, 0, 1, ng);
-                MultiFab::Divide(*Qv_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
-
-                int rhoqr_comp = solverChoice.moisture_indices.qr;
-                if (rhoqr_comp > -1) {
-                    MultiFab::Copy(  *Qr_prim[lev], vars_new[lev][Vars::cons], rhoqr_comp, 0, 1, ng);
-                    MultiFab::Divide(*Qr_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
-                } else {
-                    Qr_prim[lev]->setVal(0.0);
+            //
+            // This constructor will make the SurfaceLayer object but not allocate the arrays at each level.
+            //
+            // Build vector of eb pointers for all levels
+            amrex::Vector<const eb_*> eb_ptrs;
+            eb_ptrs.resize(finest_level + 1, nullptr);
+            if (solverChoice.terrain_type == TerrainType::EB) {
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low,
+                                                 "Surface layer with EB can only be enabled for the bottom z face");
+                for (int lev = 0; lev <= finest_level; lev++) {
+                    eb_ptrs[lev] = eb[lev] ? eb[lev].get() : nullptr;
                 }
             }
-            m_SurfaceLayer->update_mac_ptrs(lev, vars_new, Theta_prim, Qv_prim, Qr_prim);
 
-            if (restart_chkfile == "") {
-                // Only do this if starting from scratch; if restarting, then
-                // we don't want to call update_fluxes multiple times because
-                // it will change u* and theta* from their previous values
-                m_SurfaceLayer->update_pblh(lev, vars_new, z_phys_cc[lev].get(),
-                                            solverChoice.moisture_indices);
+            // Keep the historical unqualified prefix for a single zlo face,
+            // and for multiple faces when legacy zlo inputs were detected.
+            std::string face_pp_prefix(pp_prefix + "." + BoundaryFaceName[ori]);
+            if ((n_faces == 1 || use_legacy_zlo_prefix) &&
+                static_cast<int>(ori) == Orientation::zlo()) {
+                face_pp_prefix = pp_prefix;
+            }
+            m_SurfaceLayer[ori] = std::make_unique<SurfaceLayer>(ori, geom, rotate, face_pp_prefix, Qv_prim,
+                                                                 z_phys_nd,
+                                                                 zlevels_stag,
+                                                                 solverChoice.mesh_type,
+                                                                 solverChoice.terrain_type,
+                                                                 solverChoice.turbChoice[finest_level],
+                                                                 solverChoice.rdOcp,
 #ifdef ERF_USE_NETCDF
-                double elapsed_time_since_start_low = t_new[lev] + (start_time - start_low_time);
+                                                                 start_low_time, final_low_time, low_time_interval,
 #else
-                double elapsed_time_since_start_low = t_new[lev] + start_time;
+                                                                 zero, zero, zero,
 #endif
-                m_SurfaceLayer->update_fluxes(lev, t_new[lev], elapsed_time_since_start_low,
-                                              vars_new[lev][Vars::cons],
-                                              z_phys_nd[lev],
-                                              walldist[lev]);
+                                                                 eb_ptrs);
+            m_SurfaceLayer[ori]->set_surface_layer_faces(surface_layer_faces);
+            m_SurfaceLayer[ori]->set_coupled_sst_active(solverChoice.use_coupled_sst &&
+                                                        static_cast<int>(ori) == Orientation::zlo());
+            // This call will allocate the arrays at each level. If we regrid later, either changing
+            // the number of levels or just the grids at each existing level, we will call an update routine
+            // to redefine the internal arrays in m_SurfaceLayer.
+            for (int lev = 0; lev <= finest_level; lev++)
+            {
+                Vector<MultiFab*> mfv_old = {&vars_old[lev][Vars::cons], &vars_old[lev][Vars::xvel],
+                                             &vars_old[lev][Vars::yvel], &vars_old[lev][Vars::zvel]};
+                m_SurfaceLayer[ori]->make_SurfaceLayer_at_level(lev,finest_level+1,
+                                                                mfv_old, Theta_prim[lev], Qv_prim[lev],
+                                                                Qr_prim[lev], z_phys_nd[lev],
+                                                                Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
+                                                                lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
+                                                                sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
+            }
 
-                // Initialize tke(x,y,z) as a function of u*(x,y)
-                if (solverChoice.turbChoice[lev].init_tke_from_ustar) {
-                    Real qkefac = one;
-                    if (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNN25 ||
-                        solverChoice.turbChoice[lev].pbl_type == PBLType::MYNNEDMF)
-                    {
-                        // https://github.com/NCAR/MYNN-EDMF/blob/90f36c25259ec1960b24325f5b29ac7c5adeac73/module_bl_mynnedmf.F90#L1325-L1333
-                        const Real B1 = solverChoice.turbChoice[lev].pbl_mynn.B1;
-                        qkefac = Real(1.5) * std::pow(B1, two/three);
+            // If initializing from an input_sounding, make sure the surface layer
+            // is using the same surface conditions
+            // Note: do this only if using a single face on zlo, otherwise this will overwrite user specified wall values
+            if (n_faces == 1 && static_cast<int>(ori) == Orientation::zlo()) {
+                if (solverChoice.init_type == InitType::Input_Sounding) {
+                    const Real theta0 = input_sounding_data.theta_ref_inp_sound;
+                    const Real qv0    = input_sounding_data.qv_ref_inp_sound;
+                    for (int lev = 0; lev <= finest_level; lev++) {
+                        m_SurfaceLayer[ori]->set_t_surf(lev, theta0);
+                        m_SurfaceLayer[ori]->set_q_surf(lev, qv0);
                     }
-                    m_SurfaceLayer->init_tke_from_ustar(lev, vars_new[lev][Vars::cons], z_phys_nd[lev], qkefac);
                 }
             }
+
+            // We now configure ABLMost params here so that we can print the averages at t=0
+            // Note we don't fill ghost cells here because this is just for diagnostics
+            for (int lev = 0; lev <= finest_level; ++lev)
+            {
+                IntVect ng = Theta_prim[lev]->nGrowVect();
+
+                if (!updated_prim) {
+                    // This only needs to be done once (Theta,Qv_prim,Qr_prim should only be calculated once and reused for other faces)
+                    MultiFab::Copy(  *Theta_prim[lev], vars_new[lev][Vars::cons], RhoTheta_comp, 0, 1, ng);
+                    MultiFab::Divide(*Theta_prim[lev], vars_new[lev][Vars::cons],      Rho_comp, 0, 1, ng);
+
+                    if (solverChoice.moisture_type != MoistureType::None) {
+                        ng = Qv_prim[lev]->nGrowVect();
+
+                        MultiFab::Copy(  *Qv_prim[lev], vars_new[lev][Vars::cons], RhoQ1_comp, 0, 1, ng);
+                        MultiFab::Divide(*Qv_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
+
+                        int rhoqr_comp = solverChoice.moisture_indices.qr;
+                        if (rhoqr_comp > -1) {
+                            MultiFab::Copy(  *Qr_prim[lev], vars_new[lev][Vars::cons], rhoqr_comp, 0, 1, ng);
+                            MultiFab::Divide(*Qr_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
+                        } else {
+                            Qr_prim[lev]->setVal(0.0);
+                        }
+                    }
+                }
+                m_SurfaceLayer[ori]->update_mac_ptrs(lev, vars_new, Theta_prim, Qv_prim, Qr_prim);
+
+                if (restart_chkfile == "") {
+                    // Only do this if starting from scratch; if restarting, then
+                    // we don't want to call update_fluxes multiple times because
+                    // it will change u* and theta* from their previous values
+                    m_SurfaceLayer[ori]->update_pblh(lev, vars_new, z_phys_cc[lev].get(),
+                                                     solverChoice.moisture_indices);
+#ifdef ERF_USE_NETCDF
+                    double elapsed_time_since_start_low = t_new[lev] + (start_time - start_low_time);
+#else
+                    double elapsed_time_since_start_low = t_new[lev] + start_time;
+#endif
+                    m_SurfaceLayer[ori]->update_fluxes(lev, t_new[lev], elapsed_time_since_start_low,
+                                                       vars_new[lev][Vars::cons],
+                                                       z_phys_nd[lev],
+                                                       walldist[lev]);
+
+                    if (ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low) {
+                        // Initialize tke(x,y,z) as a function of u*(x,y)
+                        if (solverChoice.turbChoice[lev].init_tke_from_ustar) {
+                            Real qkefac = one;
+                            if (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNN25 ||
+                                solverChoice.turbChoice[lev].pbl_type == PBLType::MYNNEDMF)
+                            {
+                                // https://github.com/NCAR/MYNN-EDMF/blob/90f36c25259ec1960b24325f5b29ac7c5adeac73/module_bl_mynnedmf.F90#L1325-L1333
+                                const Real B1 = solverChoice.turbChoice[lev].pbl_mynn.B1;
+                                qkefac = Real(1.5) * std::pow(B1, two/three);
+                            }
+                            m_SurfaceLayer[ori]->init_tke_from_ustar(lev, vars_new[lev][Vars::cons], z_phys_nd[lev], qkefac);
+                        }
+                    }
+                }
+            }
+            updated_prim = true;
+        } else {
+            m_SurfaceLayer[ori] = nullptr;
         }
     } // end if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer)
+
+    if (!restart_chkfile.empty()) {
+        // All active faces now exist, so restore every surface-layer field once.
+        ReadCheckpointFileSurfaceLayer();
+    }
 
     // Update micro vars and finish moisture model initializations before first plot file
     if (solverChoice.moisture_type != MoistureType::None) {
@@ -1534,7 +1606,7 @@ ERF::InitData_post ()
         }
     }
 
-    if (solverChoice.rad_type != RadiationType::None)
+    if (solverChoice.rad_uses_interface())
     {
         // Create data log for radiation model if requested
         rad[0]->setupDataLog();
@@ -1698,11 +1770,276 @@ ERF::InitData_post ()
     }
 }
 
+//
+// Did this level read an initialization file (wrfinput_d0*/met_em) of its own?
+//
+// Level 0 always has one on those pathways.  A finer level only has one if the user
+// supplied erf.nc_init_file_<lev>; a level created by ERF's own refinement machinery
+// does not, and everything that would have come from the file has to be derived from
+// the parent instead.
+//
+bool
+ERF::has_own_init_file (int lev) const
+{
+    if (lev < 0 || lev >= static_cast<int>(nc_init_file.size())) { return false; }
+    return !nc_init_file[lev].empty();
+}
+
+//
+// Fill the map scale factors at lev by interpolation from lev-1.
+//
+// init_stuff() (re)builds mapfac[lev] and sets it to 1 every time a level is created or
+// remade, and only init_from_wrfinput/init_from_metgrid -- which require an init file at
+// *this* level -- ever overwrite that.  A level created by tagging therefore ran with a
+// map factor of 1 while its parent used the real MAPFAC_M/U/V from wrfinput_d01.  That is
+// not a benign inconsistency: mfsq = mf_mx*mf_my divides the horizontal fluxes in the
+// continuity and scalar equations (see AdvectionSrcForState) and in the acoustic substep,
+// so the fine level was solving a different mass equation from the one that produced the
+// momenta handed to it across the coarse/fine boundary.
+//
+// The map factor is a smooth geometric function of position, so interpolating the parent's
+// is accurate to well below the level at which any of this matters; over one coarse cell it
+// varies by O(1e-5).
+//
+void
+ERF::interp_mapfac_from_coarse (int lev)
+{
+    AMREX_ALWAYS_ASSERT(lev > 0);
+    AMREX_ALWAYS_ASSERT(mapfac[lev].size() == mapfac[lev-1].size());
+
+    for (int i = 0; i < mapfac[lev].size(); i++)
+    {
+        //
+        // With the isotropic MapFacType the _y entries alias the _x ones, so this loop
+        // visits m_x, u_x and v_x exactly once; with the anisotropic version enabled it
+        // visits all six.
+        //
+        if (!mapfac[lev][i] || !mapfac[lev-1][i]) { continue; }
+
+        //
+        // m_x is cell-centered, u_x lives on x-faces and v_x on y-faces, so each needs
+        // the interpolater that matches its index type.
+        //
+        const IndexType ixtype = mapfac[lev][i]->boxArray().ixType();
+        Interpolater* mapper = &cell_cons_interp;
+        int bccomp           = BCVars::cons_bc;
+        if (ixtype.nodeCentered(0)) {
+            mapper = &face_cons_linear_interp;
+            bccomp = BCVars::xvel_bc;
+        } else if (ixtype.nodeCentered(1)) {
+            mapper = &face_cons_linear_interp;
+            bccomp = BCVars::yvel_bc;
+        }
+
+        //
+        // DO fill the ghost cells outside the domain: the coarse level's map factors are
+        // defined there (init_from_wrfinput fills the grown box by clamping into the valid
+        // region) and the advection routines read the map factors on grown boxes.
+        //
+        IntVect ngv = mapfac[lev][i]->nGrowVect(); ngv[2] = 0;
+
+        // Ratio of 1 in z: the map factors live on ba2d, which has no vertical extent
+        // (see the note in Interp2DArrays)
+        const IntVect rr2d(refRatio(lev-1)[0], refRatio(lev-1)[1], 1);
+
+        // NOTE: this interpolater assumes that ALL ghost cells of the coarse MultiFab
+        //       have been pre-filled - this includes ghost cells both inside and outside
+        //       the domain
+        InterpFromCoarseLevel(*mapfac[lev][i], ngv, ngv,
+                              *mapfac[lev-1][i], 0, 0, 1,
+                              geom[lev-1], geom[lev],
+                              rr2d, mapper,
+                              domain_bcs_type, bccomp);
+
+        // Prefer this level's own data in the ghost cells it shares with another fine box
+        mapfac[lev][i]->FillBoundary(geom[lev].periodicity());
+    }
+}
+
+//
+// Fill the surface pressure at lev by interpolation from lev-1.
+//
+// init_stuff() (re)builds mf_PSFC[lev] every time a level is created or remade, and
+// leaves it uninitialized; only init_from_wrfinput -- which requires an init file at
+// *this* level -- ever fills it.  A level created by tagging therefore never had a
+// surface pressure at all, and a level that did read a file lost it at the next regrid.
+// update_sst_tsk uses it to convert the sea surface temperature from the wrflowinp file
+// into a potential temperature for the surface layer, and the LSM reads it as well.
+//
+void
+ERF::interp_psfc_from_coarse (int lev)
+{
+    AMREX_ALWAYS_ASSERT(lev > 0);
+
+    //
+    // PSFC comes only from wrfinput.  On any other pathway it is never filled at any
+    // level, so there is nothing to interpolate and interpolating anyway would read
+    // uninitialized data.
+    //
+    if (solverChoice.init_type != InitType::WRFInput) { return; }
+
+    if (!mf_PSFC[lev] || !mf_PSFC[lev-1]) { return; }
+
+    IntVect ngv = mf_PSFC[lev]->nGrowVect(); ngv[2] = 0;
+
+    // Ratio of 1 in z: PSFC lives on ba2d, which has no vertical extent (see the note
+    // in Interp2DArrays)
+    const IntVect rr2d(refRatio(lev-1)[0], refRatio(lev-1)[1], 1);
+
+    //
+    // Do NOT fill the ghost cells outside the domain: unlike the fields that
+    // init_from_wrfinput fills by clamping into the valid region, PSFC is copied out of
+    // the file over the intersection with the domain, so the coarse level has nothing
+    // there for us to interpolate.  Nothing reads those cells -- update_sst_tsk clamps
+    // its PSFC index into the domain.
+    //
+    InterpFromCoarseLevel(*mf_PSFC[lev], ngv, IntVect(0,0,0),
+                          *mf_PSFC[lev-1], 0, 0, 1,
+                          geom[lev-1], geom[lev],
+                          rr2d, &cell_cons_interp,
+                          domain_bcs_type, BCVars::cons_bc);
+
+    // Prefer this level's own data in the ghost cells it shares with another fine box
+    mf_PSFC[lev]->FillBoundary(geom[lev].periodicity());
+}
+
+//
+// Fill the land mask and the land / soil types at lev by injection from lev-1.
+//
+// As with the map factors, init_stuff() rebuilds these every time a level is created or
+// remade -- and sets them to a single value over the whole level (all land or all sea per
+// erf.is_land, and type 0) -- while only init_from_wrfinput, which requires an init file
+// at *this* level, reads the real LANDMASK / IVGTYP / ISLTYP.  So a level created by
+// tagging ran as uniform land while its parent had the WRF fields, and a regrid at any
+// level (including the level-0 regrid that restart() does whenever the checkpoint has
+// fewer grids than ranks) threw those fields away.  That is not benign: the land mask
+// selects the land or the sea flux branch in SurfaceLayer::compute_fluxes, decides which
+// cells update_sst_tsk applies the sea surface temperature to, and together with the land
+// and soil types drives the LSM.
+//
+// These are categories, not smooth fields, so they are injected -- every fine cell takes
+// the value of the coarse cell that contains it -- rather than interpolated.  We route
+// that through the AMReX interpolaters on a real-valued copy: the values are small
+// integers and piecewise-constant interpolation does no arithmetic on them, so they
+// survive the round trip exactly.
+//
+void
+ERF::interp_land_masks_from_coarse (int lev)
+{
+    AMREX_ALWAYS_ASSERT(lev > 0);
+
+    //
+    // Only wrfinput fills these from a file.  For every other init_type the values that
+    // init_stuff left at this level are the ones that were asked for -- erf.is_land is
+    // set per level -- and must not be replaced by the parent's.
+    //
+    // NOTE: init_from_metgrid also reads LANDMASK, but as a time series (one iMultiFab
+    //       per met_em time) rather than the single entry used here, so it needs its own
+    //       handling and is left alone.
+    //
+    if (solverChoice.init_type != InitType::WRFInput) { return; }
+
+    auto entry = [] (Vector<Vector<std::unique_ptr<iMultiFab>>>& v, int l) -> iMultiFab*
+                 { return (v[l].empty()) ? nullptr : v[l][0].get(); };
+
+    Vector<iMultiFab*> fine = {entry(    lmask_lev,lev),
+                               entry(land_type_lev,lev),
+                               entry(soil_type_lev,lev)};
+
+    Vector<iMultiFab*> crse = {entry(    lmask_lev,lev-1),
+                               entry(land_type_lev,lev-1),
+                               entry(soil_type_lev,lev-1)};
+
+    // Ratio of 1 in z: these live on ba2d, which has no vertical extent (see the note
+    // in Interp2DArrays)
+    const IntVect rr2d(refRatio(lev-1)[0], refRatio(lev-1)[1], 1);
+
+    for (int n = 0; n < fine.size(); n++)
+    {
+        if (!fine[n] || !crse[n]) { continue; }
+
+        // The land mask is the first of the three above
+        const bool is_lmask = (n == 0);
+
+        IntVect ngc = crse[n]->nGrowVect(); ngc[2] = 0;
+        IntVect ngf = fine[n]->nGrowVect(); ngf[2] = 0;
+
+        MultiFab crse_real(crse[n]->boxArray(), crse[n]->DistributionMap(), 1, ngc);
+        MultiFab fine_real(fine[n]->boxArray(), fine[n]->DistributionMap(), 1, ngf);
+
+        for (MFIter mfi(crse_real, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& gbx = mfi.growntilebox(ngc);
+            const Array4<      Real>& dst_arr = crse_real.array(mfi);
+            const Array4<const int >& src_arr = crse[n]->const_array(mfi);
+            ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                dst_arr(i,j,k) = static_cast<Real>(src_arr(i,j,k));
+            });
+        }
+
+        //
+        // DO fill the ghost cells outside the domain: SurfaceLayer::compute_fluxes reads
+        // the land mask on grown boxes without clipping into the domain.  The coarse
+        // level has those cells filled -- init_from_wrfinput fills the grown box by
+        // clamping into the valid region, init_stuff does a whole-array setVal, and this
+        // routine fills them at a level with no file of its own.
+        //
+        InterpFromCoarseLevel(fine_real, ngf, ngf,
+                              crse_real, 0, 0, 1,
+                              geom[lev-1], geom[lev],
+                              rr2d, &pc_interp,
+                              domain_bcs_type, BCVars::cons_bc);
+
+        for (MFIter mfi(fine_real, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& gbx = mfi.growntilebox(ngf);
+            const Array4<       int>& dst_arr = fine[n]->array(mfi);
+            const Array4<const Real>& src_arr = fine_real.const_array(mfi);
+            ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                const int injected = static_cast<int>(std::round(src_arr(i,j,k)));
+                //
+                // A land mask of 2 means a building, which init_zphys marks from this
+                // level's own terrain blanking before we get here (see the ordering in
+                // MakeNewLevelFromCoarse).  That is finer information than anything the
+                // parent can offer, so keep it.  2 is a legitimate category for the land
+                // and soil types, hence the test on which array this is.
+                //
+                dst_arr(i,j,k) = (is_lmask && dst_arr(i,j,k) == 2) ? 2 : injected;
+            });
+        }
+
+        // Prefer this level's own data in the ghost cells it shares with another fine box
+        fine[n]->FillBoundary(geom[lev].periodicity());
+    }
+}
+
 void
 ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping& my_dm)
 {
     if (lev == 0) { return; }
 
+    //
+    // These fields have no vertical extent: ba2d collapses z to a single index at both
+    // levels, so there is nothing in the vertical for the interpolation to do.  It must
+    // therefore be handed a ratio of 1 in z even when the levels really are refined in
+    // the vertical -- a ratio greater than 1 makes the interpolator ask for a layer of
+    // coarse ghost cells in z that a 2-D MultiFab does not, and cannot, carry.
+    //
+    const IntVect rr2d(refRatio(lev-1)[0], refRatio(lev-1)[1], 1);
+
+    //
+    // Map factors, surface pressure, land mask and land / soil types.  Unlike the fields
+    // below, these always exist by the time we get here (init_stuff builds them), so there
+    // is no "only if it hasn't been made yet" guard -- we must overwrite the placeholder
+    // that init_stuff left behind (a map factor of 1, a uniform land mask, an
+    // uninitialized surface pressure).  A level that read its own init file already has
+    // all of them from that file and must be left alone.
+    //
+    if (!has_own_init_file(lev)) {
+        interp_mapfac_from_coarse(lev);
+        interp_psfc_from_coarse(lev);
+        interp_land_masks_from_coarse(lev);
+    }
     if (lon_m[lev-1] && !lon_m[lev]) {
         auto ngv = lon_m[lev-1]->nGrowVect(); ngv[2] = 0;
         lon_m[lev] = std::make_unique<MultiFab>(my_ba2d,my_dm,1,ngv);
@@ -1721,10 +2058,24 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
                               refRatio(lev-1), &cell_cons_interp,
                               domain_bcs_type, BCVars::cons_bc);
     }
+    //
+    // The Coriolis factors.  Unlike lat_m/lon_m above, these are read one cell past the
+    // hi domain faces: the momentum sources average them onto the faces of the nodal
+    // tilebox (see the var_coriolis branch of ERF_MakeMomSources.cpp), so the x-momentum
+    // source at i = nx reads sinPhi/cosPhi at i = nx.  A level that reads its own
+    // wrfinput/met_em file fills those ghosts by clamping into the valid region; a level
+    // created by refinement must get them from the parent instead, or the Coriolis source
+    // on its hi faces is computed from uninitialized memory.
+    //
+    // NOTE: filling ghost cells outside the domain requires that ALL ghost cells of the
+    //       coarse MultiFab have already been filled, inside the domain and out.  That
+    //       holds here: init_from_wrfinput/init_from_metgrid fill the grown box at a level
+    //       with a file, and this interpolation fills it at a level without one.
+    //
     if (sinPhi_m[lev-1] && !sinPhi_m[lev]) {
         auto ngv = sinPhi_m[lev-1]->nGrowVect(); ngv[2] = 0;
         sinPhi_m[lev] = std::make_unique<MultiFab>(my_ba2d,my_dm,1,ngv);
-        InterpFromCoarseLevel(*sinPhi_m[lev], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
+        InterpFromCoarseLevel(*sinPhi_m[lev], ngv, ngv, // DO fill ghost cells outside the domain
                               *sinPhi_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
                               refRatio(lev-1), &cell_cons_interp,
@@ -1733,7 +2084,7 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
     if (cosPhi_m[lev-1] && !cosPhi_m[lev]) {
         auto ngv = cosPhi_m[lev-1]->nGrowVect(); ngv[2] = 0;
         cosPhi_m[lev] = std::make_unique<MultiFab>(my_ba2d,my_dm,1,ngv);
-        InterpFromCoarseLevel(*cosPhi_m[lev], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
+        InterpFromCoarseLevel(*cosPhi_m[lev], ngv, ngv, // DO fill ghost cells outside the domain
                               *cosPhi_m[lev-1], 0, 0, 1,
                               geom[lev-1], geom[lev],
                               refRatio(lev-1), &cell_cons_interp,
@@ -1758,7 +2109,11 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
             if (!sst_lev[lev-1][n]) { continue; }
             if (!sst_lev[lev][n]) {
                 sst_lev[lev][n] = std::make_unique<MultiFab>(my_ba2d,my_dm,1,ngv);
-                InterpFromCoarseLevel(*sst_lev[lev][n], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
+                // DO fill the ghost cells outside the domain: SurfaceLayer populates t_surf
+                // on grown tileboxes, so it reads the sea surface temperature past a
+                // non-periodic domain face.  As for the Coriolis factors above, the coarse
+                // level has those ghost cells filled (update_sst_tsk fills the grown box).
+                InterpFromCoarseLevel(*sst_lev[lev][n], ngv, ngv,
                                       *sst_lev[lev-1][n], 0, 0, 1,
                                       geom[lev-1], geom[lev],
                                       refRatio(lev-1), &cell_cons_interp,
@@ -1785,7 +2140,8 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
             if (!tsk_lev[lev-1][n]) { continue; }
             if (!tsk_lev[lev][n]) {
                 tsk_lev[lev][n] = std::make_unique<MultiFab>(my_ba2d,my_dm,1,ngv);
-                InterpFromCoarseLevel(*tsk_lev[lev][n], ngv, IntVect(0,0,0), // do not fill ghost cells outside the domain
+                // DO fill the ghost cells outside the domain -- see the note on sst_lev
+                InterpFromCoarseLevel(*tsk_lev[lev][n], ngv, ngv,
                                       *tsk_lev[lev-1][n], 0, 0, 1,
                                       geom[lev-1], geom[lev],
                                       rr2d, &cell_cons_interp,
@@ -1937,6 +2293,15 @@ ERF::restart ()
 
     ReadCheckpointFile();
 
+#ifdef ERF_USE_NETCDF
+    //
+    // The checkpoint carries every level's base state, but not the reference parameters
+    // it was built from.  Recover them now, before anything can regrid: the first regrid
+    // that creates or remakes a refined level rebuilds that level's base state from them.
+    //
+    restore_base_state_params_on_restart();
+#endif
+
     // Force regrid on level 0 if more procs than boxes are requested
     regrid_level_0_on_restart = ( regrid_level_0_on_restart ||
                                   grids[0].size() < ParallelDescriptor::NProcs() );
@@ -2057,7 +2422,41 @@ ERF::init_only (int lev, double elapsed_time)
     }
     else if (solverChoice.init_type == InitType::WRFInput && nc_init_file[lev].empty())
     {
-        amrex::Abort("This pathway is not quite implemented yet");
+        //
+        // A refined level with no wrfinput file of its own: the level was created by
+        // ERF's own refinement machinery rather than read from a wrfinput_d0*.  Level 0
+        // must always have a file (checked in ParameterSanityChecks), so this is lev > 0.
+        //
+        // Note the caller has already built the terrain at this level for us -- see the
+        // ordering in MakeNewLevelFromScratch -- because unlike the has-a-file case there
+        // is no file here to build z_phys from, and the base state below needs it.
+        //
+        AMREX_ALWAYS_ASSERT(lev > 0);
+        AMREX_ALWAYS_ASSERT(z_phys_cc[lev] != nullptr);
+
+        make_physbcs(lev);
+
+        // Fill the part of this level that lies inside the domain but outside the fine
+        // grids, and the fine ghost cells, from the coarser level.
+        interp_base_state_from_coarse(lev);
+
+        // Now build the base state on the fine grids by exactly the construction level 0
+        // used: the analytic reference profile from the level-0 parameters, evaluated at
+        // this level's cell-centered heights, followed by the discrete hydrostatic
+        // rebalance.  Running the same procedure on both levels is what makes their base
+        // states agree; interpolating the coarse base state instead would leave this level
+        // not discretely hydrostatic on its own mesh.
+        rebuild_base_state_from_wrfinput(lev, base_state[lev]);
+        (*physbcs_base[lev])(base_state[lev],0,base_state[lev].nComp(),base_state[lev].nGrowVect());
+
+        // The state itself is interpolated from the coarser level.  This must come after the
+        // base state, since it interpolates perturbational quantities relative to it.
+        FillCoarsePatch(lev, elapsed_time);
+
+        // The 2D/surface arrays likewise have no file to come from at this level.  That
+        // includes PSFC and the land mask / land type / soil type, which Interp2DArrays
+        // takes from the parent for a level with no init file of its own.
+        Interp2DArrays(lev, ba2d[lev], dmap[lev]);
     }
     else if (solverChoice.init_type == InitType::NCFile)
     {
@@ -2151,9 +2550,16 @@ ERF::init_only (int lev, double elapsed_time)
 void
 ERF::ReadParameters ()
 {
+    // Record the inputs table before anything below can modify it.  Every query
+    // here and in the classes built afterwards is a queryAdd, which inserts the
+    // default it was handed when the key is absent, so this is the only point at
+    // which "the key is in the table" still means "the user wrote it".
+    user_specified_inputs = ParmParse::getEntries(pp_prefix);
+
     std::string prob_name = "Undefined";
     ParmParse pp_pn("erf");
     pp_pn.queryAdd("prob_name", prob_name);
+    ibseb_params.init_params();
     Print() << "Problem name (from inputs file) is: "
             << " \"" << prob_name << "\" " << std::endl;
 
@@ -2212,6 +2618,7 @@ ERF::ReadParameters ()
         int nlevs_max = max_level + 1;
         istep.resize(nlevs_max, 0);
         nsubsteps.resize(nlevs_max, 1);
+        rad_interp_from_coarse_pending.resize(nlevs_max, 0);
         // This is the default
         for (int lev = 1; lev <= max_level; ++lev) {
             nsubsteps[lev] = MaxRefRatio(lev-1);
@@ -2529,6 +2936,34 @@ ERF::ReadParameters ()
 #endif
 
     solverChoice.init_params(max_level,pp_prefix);
+
+    // Implicit acoustic substepping inverts one tridiagonal system per column, so it is
+    // only well posed if no column is chopped between boxes.  That does not require one
+    // box per column: a level may have several boxes over the same (i,j) -- as it does
+    // where the refined region is a staircase in z, or covers two separate layers -- as
+    // long as they do not touch, so that each contiguous run of cells in the column is
+    // solved by itself.  What must not happen is two boxes sharing a face normal to z,
+    // which would split one column into pieces solved separately, with spurious internal
+    // boundaries at the seam and an answer that depends on the decomposition.
+    // amr.no_box_split_dir = 2 -- the ERF default, set in add_par -- is what rules that
+    // out: the grid generator merges the boxes it makes along z, so no two of them share
+    // a face normal to z.  Refuse to run with any other value while a level substeps
+    // implicitly.
+    for (int lev = 0; lev <= max_level; lev++) {
+        if ( (solverChoice.substepping_type[lev] == SubsteppingType::Implicit) &&
+             (no_box_split_dir != 2) )
+        {
+            Abort("erf.substepping_type = Implicit at level " + std::to_string(lev) +
+                  " requires amr.no_box_split_dir = 2 (the ERF default), so that no two grids "
+                  "share a face normal to z: the implicit substep solve inverts one tridiagonal "
+                  "system per column, and a column chopped at such a seam would instead be "
+                  "solved in pieces, giving an answer that depends on the grid decomposition.  "
+                  "(Boxes stacked over the same column are fine as long as they do not touch.)  "
+                  "Either remove amr.no_box_split_dir = " +
+                  std::to_string(no_box_split_dir) + " from the inputs file, or set "
+                  "erf.substepping_type = None.");
+        }
+    }
 
     // Set a default value for write_erfbdy following these rules.
     // Prioritize write_erfbdy provided by user.
@@ -3019,9 +3454,12 @@ ERF::MakeDiagnosticAverage (Vector<Real>& h_havg, MultiFab& S, int n)
     h_havg.resize(size_z, 0.0_rt);
 
     // Get the cell centered data and construct sums
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
+    //
+    // NOTE: deliberately not threaded.  Every iteration does "h_havg[k] += ..." into the
+    //       same shared Vector with no atomic and no per-thread partials, so threading it
+    //       would be an outright data race on top of an order-dependent sum.  The body is
+    //       a pure reduction, so running it serially costs little.
+    //
     for (MFIter mfi(S); mfi.isValid(); ++mfi) {
         const Box& box = mfi.validbox();
         const IntVect& se = box.smallEnd();
@@ -3317,4 +3755,32 @@ ERF::check_mesh_type(int lev)
            }
        }
    }
+}
+
+/**
+ * Whether the user wrote any surface-layer input under the given prefix.
+ *
+ * This asks the snapshot taken in ReadParameters, not the live ParmParse table.
+ * The live table cannot answer the question: ERF_InputSoundingData.H queries
+ * erf.most.surf_temp and erf.most.surf_moist with queryAdd while reading the
+ * sounding, which runs during InitData_pre and leaves both keys in the table
+ * holding their negative sentinels.  Testing the live table would therefore
+ * report unqualified MOST inputs for every input_sounding run, whether or not
+ * the user wrote any.
+ *
+ * @param[in] prefix the prefix to test, e.g. "erf" or "erf.zlo"
+ */
+bool
+ERF::has_surface_layer_inputs (const std::string& prefix) const
+{
+    const std::string most_prefix = prefix + ".most.";
+    const std::string surface_layer_prefix = prefix + ".surface_layer.";
+
+    for (const auto& key : user_specified_inputs) {
+        if (key.compare(0, most_prefix.size(), most_prefix) == 0 ||
+            key.compare(0, surface_layer_prefix.size(), surface_layer_prefix) == 0) {
+            return true;
+        }
+    }
+    return false;
 }

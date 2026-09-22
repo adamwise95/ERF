@@ -11,11 +11,12 @@
 #include <AMReX_Reduce.H>
 
 #include "ERF_DataStruct.H"
-#include "ERF_Constants.H"
+#include "ERF_NumericalConstants.H"
 #include "ERF_EOS.H"
 #include "ERF_HSEUtils.H"
 #include "ERF_GridUtils.H"
 #include "ERF_TileNoZ.H"
+#include "ERF_ColumnBands.H"
 
 #ifdef ERF_USE_NETCDF
 #include <ERF_NCInterface.H>
@@ -385,6 +386,32 @@ public:
         }
     }
 
+    /**
+     * Function to report whether the user has actually specified a terrain surface,
+     * i.e. whether init_terrain_surface will do anything other than return flat terrain.
+     *
+     * This mirrors the source precedence in init_terrain_surface, and is deliberately
+     * kept next to it so that the two cannot drift apart.  A problem that overrides
+     * the terrain unconditionally, rather than keying off prob.custom_terrain_type,
+     * should override this to return true.
+    */
+    virtual bool
+    terrain_is_specified ()
+    {
+        amrex::ParmParse pp("erf");
+        std::string fname;
+        if (pp.query("terrain_file_name_nc",   fname) ||
+            pp.query("terrain_file_name",      fname) ||
+            pp.query("terrain_file_name_USGS", fname)) {
+            return true;
+        }
+
+        std::string custom_terrain_type = "None";
+        amrex::ParmParse pp_prob("prob");
+        pp_prob.query("custom_terrain_type", custom_terrain_type);
+        return (custom_terrain_type != "None");
+    }
+
 #ifdef ERF_USE_NETCDF
     void
     read_terrain_netcdf (const std::string& fname,
@@ -718,7 +745,7 @@ public:
         const amrex::Real terrain_dy = m_yterrain[1] - m_yterrain[0];
 
         if (!mass_point_terrain && !zbx.isEmpty()) {
-            amrex::Box target_box = zbx & amrex::convert(geom.Domain(), amrex::IntVect(1, 1, 0));
+            amrex::Box target_box = zbx & amrex::convert(geom.Domain(), zbx.ixType());
             if (!target_box.isEmpty()) {
                 target_box.setSmall(2, zbx.smallEnd(2));
                 target_box.setBig(2, zbx.smallEnd(2));
