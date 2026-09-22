@@ -788,6 +788,10 @@ struct PlaneSampler
                     m_varnames.push_back("pressure");
                     amrex::Print() << " " << "pressure";
                 }
+                if (containerHasElement(requested_vars, "scalar")) {
+                    m_varnames.push_back("scalar");
+                    amrex::Print() << " " << "scalar";
+                }
                 amrex::Print() << std::endl;
             }
         }
@@ -1054,6 +1058,25 @@ struct PlaneSampler
                                 dfab(i,j,k,mf_comp) = getPgivenRTh(cfab(i,j,k,RhoTheta_comp));
                             });
                         }
+                    }
+                    mf_comp += 1;
+                }
+
+                if (containerHasElement(m_varnames, "scalar")) {
+                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(vars_new[ilev][Vars::cons].nComp() > RhoScalar_comp,
+                        "scalar sampling requested but scalar component not present in state");
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+                    for (amrex::MFIter mfi(mf_cc_data, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                        const amrex::Box& tbx = mfi.tilebox();
+                        auto const& dfab = mf_cc_data.array(mfi);
+                        auto const& cfab = vars_new[ilev][Vars::cons].array(mfi);
+
+                        amrex::ParallelFor(tbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                        {
+                            dfab(i,j,k,mf_comp) = cfab(i,j,k,RhoScalar_comp) / cfab(i,j,k,Rho_comp);
+                        });
                     }
                     mf_comp += 1;
                 }
