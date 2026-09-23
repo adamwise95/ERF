@@ -847,42 +847,56 @@ struct PlaneSampler
                     // If z_phys_cc is available and dir==2 (z-direction), find k by searching z_phys
                     if (dir == 2 && ilev < static_cast<int>(z_phys_cc.size()) && z_phys_cc[ilev]) {
                         // Sample z_phys_cc to find the k index closest to the requested height
-                        // Use the first available box (domain may be decomposed across MPI ranks)
+                        // Use the domain center to ensure all MPI ranks sample at the same (i,j) location
+                        const amrex::Box& domain = geom[ilev].Domain();
+                        int sample_i = (domain.smallEnd(0) + domain.bigEnd(0)) / 2;
+                        int sample_j = (domain.smallEnd(1) + domain.bigEnd(1)) / 2;
+
                         amrex::Real min_diff = std::numeric_limits<amrex::Real>::max();
                         k_l = 0;
                         bool found = false;
-                        int sample_i = 0, sample_j = 0;
                         amrex::Real z_terrain = 0.0;
 
+                        // Check if this rank owns the domain center point
                         for (amrex::MFIter mfi(*z_phys_cc[ilev]); mfi.isValid(); ++mfi) {
                             const amrex::Box& bx = mfi.validbox();
-                            // Use the center of this box for sampling
-                            sample_i = (bx.smallEnd(0) + bx.bigEnd(0)) / 2;
-                            sample_j = (bx.smallEnd(1) + bx.bigEnd(1)) / 2;
 
-                            auto const& z_arr = z_phys_cc[ilev]->const_array(mfi);
+                            // Only process if this box contains the domain center point
+                            if (bx.contains(amrex::IntVect(sample_i, sample_j, bx.smallEnd(2)))) {
+                                auto const& z_arr = z_phys_cc[ilev]->const_array(mfi);
 
-                            // Get terrain height (z at k=0)
-                            z_terrain = z_arr(sample_i, sample_j, bx.smallEnd(2));
+                                // Get terrain height (z at k=0)
+                                z_terrain = z_arr(sample_i, sample_j, bx.smallEnd(2));
 
-                            // Search through all k levels in this box for height AGL (above ground level)
-                            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-                                amrex::Real z_asl = z_arr(sample_i, sample_j, k);
-                                amrex::Real z_agl = z_asl - z_terrain;  // Height above ground level
-                                amrex::Real diff = std::abs(z_agl - point);
-                                if (diff < min_diff) {
-                                    min_diff = diff;
-                                    k_l = k;
-                                    found = true;
+                                // Search through all k levels in this box for height AGL (above ground level)
+                                for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
+                                    amrex::Real z_asl = z_arr(sample_i, sample_j, k);
+                                    amrex::Real z_agl = z_asl - z_terrain;  // Height above ground level
+                                    amrex::Real diff = std::abs(z_agl - point);
+                                    if (diff < min_diff) {
+                                        min_diff = diff;
+                                        k_l = k;
+                                        found = true;
+                                    }
+                                }
+
+                                if (found) {
+                                    // Get the actual z coordinate at this k level
+                                    actual_point = z_arr(sample_i, sample_j, k_l);
+                                    break; // Found the domain center
                                 }
                             }
-
-                            if (found) {
-                                // Get the actual z coordinate at this k level
-                                actual_point = z_arr(sample_i, sample_j, k_l);
-                                break; // Use first box found
-                            }
                         }
+
+                        // Broadcast the found k_l and actual_point from the rank that owns the center
+                        // to all other ranks so they all use the same k index
+                        int found_int = found ? 1 : 0;
+                        amrex::ParallelDescriptor::ReduceIntMax(found_int);
+                        amrex::ParallelDescriptor::ReduceIntMax(k_l);
+                        amrex::ParallelDescriptor::ReduceRealMax(actual_point);
+                        amrex::ParallelDescriptor::ReduceRealMax(z_terrain);
+                        amrex::ParallelDescriptor::ReduceRealMin(min_diff);
+                        found = (found_int > 0);
 
                         if (found) {
                             amrex::Real z_agl_found = actual_point - z_terrain;
