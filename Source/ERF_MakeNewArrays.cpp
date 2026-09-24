@@ -1087,7 +1087,7 @@ ERF::init_zphys (int lev, double elapsed_time)
             amrex::ParallelFor(bx2d, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 // Use k=0 for the terrain_blanking field
                 if (t_blank_arr(i, j, 0) > 0.0) {
-                    lmask_arr(i, j, k) = 2;
+                    lmask_arr(i, j, k) = 1; //2;
                 }
             });
         }

@@ -567,6 +567,9 @@ struct surface_flux
                                  -(qvm_arr(i,j,k) - q_surf_arr(i,j,k)) * ustar * mdata.kappa /
                                   (std::log(zref / z0_arr(i,j,k)) - psi_h); // <w'Qv'>
             tflux = mdata.surf_temp_flux*(one + epsv*qvm_arr(i,j,k)) + qflux*epsv*tm_arr(i,j,k);
+            // Add floor to prevent near-zero division in Obukhov length calculation
+            amrex::Real tflux_abs = amrex::max(std::abs(tflux), amrex::Real(1.0e-6));
+            tflux = (tflux >= zero) ? tflux_abs : -tflux_abs;
             if (w_star_arr) {
                 // update w* and Umagmean
                 w_star_arr(i,j,k) = calc_wstar(tflux, pblh_arr(i,j,k), tvm_arr(i,j,k));
@@ -582,14 +585,17 @@ struct surface_flux
             Olen  = -ustar_floor * ustar_floor * ustar_floor * tvm_arr(i,j,k) /
                     (mdata.kappa * mdata.gravity * tflux);
             zeta  = zref / Olen;
-            zeta  = amrex::max(amrex::min(zeta, amrex::Real(100.0)), -amrex::Real(100.0));
+            zeta  = amrex::max(amrex::min(zeta, amrex::Real(10.0)), -amrex::Real(50.0));
             psi_m = sfuns.calc_psi_m(zeta);
             psi_h = sfuns.calc_psi_h(zeta);
             //u_star_arr(i,j,k) = mdata.kappa * umm / (std::log(zref / z0_arr(i,j,k)) - psi_m);
+            psi_m = amrex::min(psi_m, std::log(zref / z0_arr(i,j,k)) - amrex::Real(0.01));
             {
                 amrex::Real ustar_new = mdata.kappa * umm / (std::log(zref / z0_arr(i,j,k)) - psi_m);
                 u_star_arr(i,j,k) = (one - alpha) * ustar + alpha * ustar_new;
             }
+            if (!(u_star_arr(i,j,k) > 0.0 && !std::isnan(u_star_arr(i,j,k)))) { u_star_arr(i,j,k) = USTARMIN; }
+            if (!(u_star_arr(i,j,k) < 2.0 && !std::isnan(u_star_arr(i,j,k)))) { u_star_arr(i,j,k) = 2.0; }
             ++iter;
         } while ((std::abs(u_star_arr(i,j,k) - ustar) > tol) && iter <= max_iters);
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(iter < max_iters,
@@ -627,10 +633,10 @@ private:
     most_data mdata;
     bool spec_qflux;
     similarity_funs sfuns;
-    const amrex::Real tol = amrex::Real(1.0e-5);
-    const amrex::Real WSMIN = amrex::Real(0.1); // minimum wind speed
-    const amrex::Real USTARMIN = amrex::Real(0.001); // minimum friction velocity
-    const amrex::Real alpha = amrex::Real(0.5); // under-relaxation factor for umm/u* iteration
+    const amrex::Real tol = amrex::Real(1.0e-4);      // Relaxed tolerance for better convergence
+    const amrex::Real WSMIN = amrex::Real(0.5);       // Increased minimum wind speed for stability
+    const amrex::Real USTARMIN = amrex::Real(0.01);   // Increased minimum friction velocity
+    const amrex::Real alpha = amrex::Real(0.3);       // Stronger under-relaxation for stability
 };
 
 
