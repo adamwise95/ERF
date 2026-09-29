@@ -1002,8 +1002,8 @@ MOSTAverage::set_k_indices_T (const int& lev)
     bool read_z = user_zref;
     auto read_k = pp.queryarr("most.k_arr_in",m_k_in);
 
-    // Allow default zref
-    if (!read_z) {
+    // Allow default zref only if k_arr_in is not specified
+    if (!read_z && !read_k) {
         zref_tmp = zref_default;
         Print() << "most.zref not specified, query distance default is " << zref_tmp << std::endl;
         read_z = true;
@@ -1127,7 +1127,79 @@ MOSTAverage::set_k_indices_T (const int& lev)
 
     // Specified k_indx & compute z_ref
     } else if (read_k) {
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, "Specified k-indx with terrain not implemented!");
+        const Box domain = m_geom[lev].Domain();
+        const int zlo = domain.smallEnd(2);
+        const int zhi = domain.bigEnd(2);
+        const int top_node = zhi + 1;
+        const int ncell = domain.length(2);
+
+        // Preserve the established z-low convention: k_arr_in is an
+        // absolute cell index on zlo. All other faces interpret k_arr_in as
+        // a distance in cells from the selected wall.
+        const int wall_offset = is_lo_face
+            ? m_k_in[lev] - zlo
+            : m_k_in[lev];
+
+        if (is_lo_face) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+                m_k_in[lev] >= zlo && m_k_in[lev] <= zhi,
+                "MOST zlo reference index must lie inside the domain!");
+        } else {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+                wall_offset >= 0 && wall_offset < ncell,
+                "MOST wall-relative reference offset must lie inside the domain!");
+        }
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(wall_offset >= m_radius,
+                                         "K index must be larger than averaging radius!");
+
+        const int ref_index = is_lo_face
+            ? m_k_in[lev]
+            : zhi - wall_offset;
+
+        // Iterate over all boxes to compute zref from terrain-fitted coordinates
+        for (MFIter mfi(*m_fields[lev][3], TileNoZ()); mfi.isValid(); ++mfi) {
+            Box npbx = mfi.tilebox(IntVect(1,1,0),ng_indx);
+            const Box vbx = mfi.validbox();
+
+            if (is_lo_face) {
+                if (vbx.smallEnd(2) != zlo) { continue; }
+                npbx.makeSlab(2,zlo);
+            } else {
+                if (vbx.bigEnd(2) != zhi) { continue; }
+                npbx.makeSlab(2,zhi);
+            }
+
+            const auto z_phys_arr = m_z_phys_nd[lev]->const_array(mfi);
+            auto k_arr = m_k_indx[lev]->array(mfi);
+            auto zref_arr = m_zref[lev]->array(mfi);
+
+            // Lambda to compute cell-centered height from nodal terrain data
+            auto z_at = [=] AMREX_GPU_DEVICE (int i, int j, int node_k) noexcept -> Real
+            {
+                return fourth * ( z_phys_arr(i  ,j  ,node_k) + z_phys_arr(i+1,j  ,node_k)
+                                + z_phys_arr(i  ,j+1,node_k) + z_phys_arr(i+1,j+1,node_k) );
+            };
+
+            ParallelFor(npbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                // Set the k index
+                k_arr(i,j,k) = ref_index;
+
+                // Compute zref from the terrain-fitted coordinates
+                const int face_node = is_lo_face ? zlo : top_node;
+                const Real z_face = z_at(i, j, face_node);
+                const Real z_lo = z_at(i, j, ref_index);
+                const Real z_hi = z_at(i, j, ref_index + 1);
+                const Real z_cell = myhalf * (z_hi + z_lo);
+
+                // Store the height above/below the surface
+                zref_arr(i,j,k) = is_lo_face ? z_cell - z_face : z_face - z_cell;
+            });
+        }
+
+        const Periodicity period = tangential_periodicity(m_geom[lev], 2);
+        m_k_indx[lev]->FillBoundary(m_k_indx[lev]->nGrowVect(), period);
+        m_zref[lev]->FillBoundary(m_zref[lev]->nGrowVect(), period);
     }
 }
 
