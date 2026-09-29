@@ -209,7 +209,9 @@ MOSTAverage::make_MOSTAverage_at_level (const int& lev,
 
         m_fields[lev][0] = vars_old[Vars::xvel];
         m_averages[lev][0] = std::make_unique<MultiFab>(ba2d,dm,ncomp,ng);
-        m_averages[lev][0]->setVal(bogus_large_value);
+        // Initialize with reasonable values: zero for new levels, bogus for level 0
+        // to indicate they need to be computed on first update_fluxes call
+        m_averages[lev][0]->setVal(lev > 0 ? 0.0 : bogus_large_value);
         if (m_rotate) {
             m_rot_fields[lev][0] = std::make_unique<MultiFab>(ba,dm,ncomp,ng);
             MultiFab::Copy(*m_rot_fields[lev][0],mf,0,0,1,ng);
@@ -240,7 +242,8 @@ MOSTAverage::make_MOSTAverage_at_level (const int& lev,
 
         m_fields[lev][1] = vars_old[Vars::yvel];
         m_averages[lev][1] = std::make_unique<MultiFab>(ba2d,dm,ncomp,ng);
-        m_averages[lev][1]->setVal(bogus_large_value);
+        // Initialize with reasonable values: zero for new levels, bogus for level 0
+        m_averages[lev][1]->setVal(lev > 0 ? 0.0 : bogus_large_value);
         if (m_rotate) {
             m_rot_fields[lev][1] = std::make_unique<MultiFab>(ba,dm,ncomp,ng);
             MultiFab::Copy(*m_rot_fields[lev][1],mf,0,0,1,ng);
@@ -306,9 +309,11 @@ MOSTAverage::make_MOSTAverage_at_level (const int& lev,
         }
 
         // Initialize remaining multifabs
+        // For new levels (lev > 0), use zero as a reasonable initial value
+        // For level 0, use bogus_large_value to indicate values need to be computed
         for (int iavg(3); iavg < m_navg; ++iavg) {
             m_averages[lev][iavg] = std::make_unique<MultiFab>(ba2d,dm,ncomp,ng);
-            m_averages[lev][iavg]->setVal(bogus_large_value);
+            m_averages[lev][iavg]->setVal(lev > 0 ? 0.0 : bogus_large_value);
         }
 
         // Default to dry
