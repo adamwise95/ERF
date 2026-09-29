@@ -590,6 +590,7 @@ struct surface_flux
             psi_h = sfuns.calc_psi_h(zeta);
             //u_star_arr(i,j,k) = mdata.kappa * umm / (std::log(zref / z0_arr(i,j,k)) - psi_m);
             psi_m = amrex::min(psi_m, std::log(zref / z0_arr(i,j,k)) - amrex::Real(0.01));
+            // if (psi_m > std::log(zref / z0_arr(i,j,k))) { psi_m = std::log(zref / z0_arr(i,j,k)); }
             {
                 amrex::Real ustar_new = mdata.kappa * umm / (std::log(zref / z0_arr(i,j,k)) - psi_m);
                 u_star_arr(i,j,k) = (one - alpha) * ustar + alpha * ustar_new;
