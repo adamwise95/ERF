@@ -1241,6 +1241,24 @@ ERF::FillPlot3DVars (int lev,
             mf_comp ++;
         }
 
+        if (containerHasElement(plot_var_names, "scalar_t_avg")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                const Real norm = t_avg_cnt[lev];
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,6) / norm;
+                });
+            }
+            mf_comp ++;
+        }
+
     }
 
     if (solverChoice.compute_mean_vars) {

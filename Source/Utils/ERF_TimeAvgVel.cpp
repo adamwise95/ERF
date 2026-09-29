@@ -12,7 +12,8 @@ Time_Avg_Vel_atCC (double dt_d,
                    MultiFab* vel_t_avg,
                    MultiFab& xvel,
                    MultiFab& yvel,
-                   MultiFab& zvel)
+                   MultiFab& zvel,
+                   MultiFab& cons)
 {
     // Augment the counter
     t_avg_cnt += dt_d;
@@ -31,6 +32,9 @@ Time_Avg_Vel_atCC (double dt_d,
         const Array4<Real>& velx = xvel.array(mfi);
         const Array4<Real>& vely = yvel.array(mfi);
         const Array4<Real>& velz = zvel.array(mfi);
+
+        // Conservative variables at CC
+        const Array4<Real>& cons_arr = cons.array(mfi);
 
         // Time average at CC
         Array4<Real> vel_t_avg_arr = vel_t_avg->array(mfi);
@@ -51,12 +55,16 @@ Time_Avg_Vel_atCC (double dt_d,
             Real wp = w_cc - w_mean;
             Real tke = myhalf * (up*up + vp*vp + wp*wp);
 
+            // Scalar = RhoScalar / rho
+            Real scalar_cc = cons_arr(i,j,k,RhoScalar_comp) / cons_arr(i,j,k,Rho_comp);
+
             vel_t_avg_arr(i,j,k,0) += u_cc * dt;
             vel_t_avg_arr(i,j,k,1) += v_cc * dt;
             vel_t_avg_arr(i,j,k,2) += w_cc * dt;
             vel_t_avg_arr(i,j,k,3) += umag_cc * dt;
             vel_t_avg_arr(i,j,k,4) += tke * dt;
             vel_t_avg_arr(i,j,k,5)  = tke;
+            vel_t_avg_arr(i,j,k,6) += scalar_cc * dt;
         });
     }
 }

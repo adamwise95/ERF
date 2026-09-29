@@ -1623,7 +1623,7 @@ private:
                                                     "z_phys", "detJ", "h_xi", "h_eta", "h_zeta",
                                                     "mapfac", "lat_m", "lon_m",
                                                     // Time averaged velocity
-                                                    "u_t_avg", "v_t_avg", "w_t_avg", "umag_t_avg", "tke_t_avg", "tke",
+                                                    "u_t_avg", "v_t_avg", "w_t_avg", "umag_t_avg", "tke_t_avg", "tke", "scalar_t_avg",
                                                     // Interval means and resolved turbulence moments
                                                     "u_mean", "v_mean", "w_mean", "theta_mean",
                                                     "uu_mean", "vv_mean", "ww_mean", "uw_mean", "vw_mean", "wtheta_mean",
