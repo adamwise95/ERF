@@ -1625,6 +1625,9 @@ private:
                                                     // Time averaged velocity
                                                     "u_t_avg", "v_t_avg", "w_t_avg", "umag_t_avg", "tke_t_avg", "tke", "scalar_t_avg",
                                                     "up_t_avg", "vp_t_avg", "wp_t_avg", "up", "vp", "wp",
+                                                    // Turbulent stress tensor components
+                                                    "tau11_t_avg", "tau22_t_avg", "tau33_t_avg", "tau12_t_avg", "tau13_t_avg", "tau23_t_avg",
+                                                    "tau11", "tau22", "tau33", "tau12", "tau13", "tau23",
                                                     // Interval means and resolved turbulence moments
                                                     "u_mean", "v_mean", "w_mean", "theta_mean",
                                                     "uu_mean", "vv_mean", "ww_mean", "uw_mean", "vw_mean", "wtheta_mean",

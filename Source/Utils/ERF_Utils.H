@@ -283,7 +283,13 @@ Time_Avg_Vel_atCC (double dt,
                    amrex::MultiFab& xvel,
                    amrex::MultiFab& yvel,
                    amrex::MultiFab& zvel,
-                   amrex::MultiFab& cons);
+                   amrex::MultiFab& cons,
+                   amrex::MultiFab* tau11,
+                   amrex::MultiFab* tau22,
+                   amrex::MultiFab* tau33,
+                   amrex::MultiFab* tau12,
+                   amrex::MultiFab* tau13,
+                   amrex::MultiFab* tau23);
 
 /**
  * Accumulate time-weighted cell-centered velocity/theta first and second moments.

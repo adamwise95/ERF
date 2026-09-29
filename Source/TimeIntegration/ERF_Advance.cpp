@@ -457,7 +457,9 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // Update the time averaged velocities if they are requested
     // ***********************************************************************************************
     if (solverChoice.time_avg_vel) {
-        Time_Avg_Vel_atCC(dt[lev], t_avg_cnt[lev], vel_t_avg[lev].get(), U_new, V_new, W_new, S_new);
+        Time_Avg_Vel_atCC(dt[lev], t_avg_cnt[lev], vel_t_avg[lev].get(), U_new, V_new, W_new, S_new,
+                          Tau[lev][TauType::tau11].get(), Tau[lev][TauType::tau22].get(), Tau[lev][TauType::tau33].get(),
+                          Tau[lev][TauType::tau12].get(), Tau[lev][TauType::tau13].get(), Tau[lev][TauType::tau23].get());
     }
 
     // ***********************************************************************************************

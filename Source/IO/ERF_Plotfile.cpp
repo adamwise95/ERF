@@ -1364,6 +1364,117 @@ ERF::FillPlot3DVars (int lev,
             mf_comp ++;
         }
 
+        // Time-averaged turbulent stress components
+        if (containerHasElement(plot_var_names, "tau11_t_avg")) copy_time_average(13);
+        if (containerHasElement(plot_var_names, "tau22_t_avg")) copy_time_average(14);
+        if (containerHasElement(plot_var_names, "tau33_t_avg")) copy_time_average(15);
+        if (containerHasElement(plot_var_names, "tau12_t_avg")) copy_time_average(16);
+        if (containerHasElement(plot_var_names, "tau13_t_avg")) copy_time_average(17);
+        if (containerHasElement(plot_var_names, "tau23_t_avg")) copy_time_average(18);
+
+        // Instantaneous turbulent stress components
+        if (containerHasElement(plot_var_names, "tau11")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,19);
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tau22")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,20);
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tau33")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,21);
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tau12")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,22);
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tau13")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,23);
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tau23")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,24);
+                });
+            }
+            mf_comp ++;
+        }
+
     }
 
     if (solverChoice.compute_mean_vars) {

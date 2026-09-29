@@ -13,7 +13,13 @@ Time_Avg_Vel_atCC (double dt_d,
                    MultiFab& xvel,
                    MultiFab& yvel,
                    MultiFab& zvel,
-                   MultiFab& cons)
+                   MultiFab& cons,
+                   MultiFab* tau11,
+                   MultiFab* tau22,
+                   MultiFab* tau33,
+                   MultiFab* tau12,
+                   MultiFab* tau13,
+                   MultiFab* tau23)
 {
     // Augment the counter
     t_avg_cnt += dt_d;
@@ -35,6 +41,14 @@ Time_Avg_Vel_atCC (double dt_d,
 
         // Conservative variables at CC
         const Array4<Real>& cons_arr = cons.array(mfi);
+
+        // Turbulent stress components (diagonal are already CC, off-diagonal need interpolation)
+        const Array4<Real>& tau11_arr = (tau11) ? tau11->array(mfi) : Array4<Real>{};
+        const Array4<Real>& tau22_arr = (tau22) ? tau22->array(mfi) : Array4<Real>{};
+        const Array4<Real>& tau33_arr = (tau33) ? tau33->array(mfi) : Array4<Real>{};
+        const Array4<Real>& tau12_arr = (tau12) ? tau12->array(mfi) : Array4<Real>{};
+        const Array4<Real>& tau13_arr = (tau13) ? tau13->array(mfi) : Array4<Real>{};
+        const Array4<Real>& tau23_arr = (tau23) ? tau23->array(mfi) : Array4<Real>{};
 
         // Time average at CC
         Array4<Real> vel_t_avg_arr = vel_t_avg->array(mfi);
@@ -58,6 +72,21 @@ Time_Avg_Vel_atCC (double dt_d,
             // Scalar = RhoScalar / rho
             Real scalar_cc = cons_arr(i,j,k,RhoScalar_comp) / cons_arr(i,j,k,Rho_comp);
 
+            // Turbulent stress components interpolated to cell center
+            // tau11, tau22, tau33 are already at cell centers
+            // tau12 is at (i+1/2, j+1/2, k) - average to cell center
+            // tau13 is at (i+1/2, j, k+1/2) - average to cell center
+            // tau23 is at (i, j+1/2, k+1/2) - average to cell center
+            Real tau11_cc = (tau11_arr) ? tau11_arr(i,j,k) : Real(0.0);
+            Real tau22_cc = (tau22_arr) ? tau22_arr(i,j,k) : Real(0.0);
+            Real tau33_cc = (tau33_arr) ? tau33_arr(i,j,k) : Real(0.0);
+            Real tau12_cc = (tau12_arr) ? Real(0.25) * (tau12_arr(i,j,k) + tau12_arr(i+1,j,k) +
+                                                         tau12_arr(i,j+1,k) + tau12_arr(i+1,j+1,k)) : Real(0.0);
+            Real tau13_cc = (tau13_arr) ? Real(0.25) * (tau13_arr(i,j,k) + tau13_arr(i+1,j,k) +
+                                                         tau13_arr(i,j,k+1) + tau13_arr(i+1,j,k+1)) : Real(0.0);
+            Real tau23_cc = (tau23_arr) ? Real(0.25) * (tau23_arr(i,j,k) + tau23_arr(i,j+1,k) +
+                                                         tau23_arr(i,j,k+1) + tau23_arr(i,j+1,k+1)) : Real(0.0);
+
             vel_t_avg_arr(i,j,k,0)  += u_cc * dt;
             vel_t_avg_arr(i,j,k,1)  += v_cc * dt;
             vel_t_avg_arr(i,j,k,2)  += w_cc * dt;
@@ -71,6 +100,18 @@ Time_Avg_Vel_atCC (double dt_d,
             vel_t_avg_arr(i,j,k,10)  = up;
             vel_t_avg_arr(i,j,k,11)  = vp;
             vel_t_avg_arr(i,j,k,12)  = wp;
+            vel_t_avg_arr(i,j,k,13) += tau11_cc * dt;
+            vel_t_avg_arr(i,j,k,14) += tau22_cc * dt;
+            vel_t_avg_arr(i,j,k,15) += tau33_cc * dt;
+            vel_t_avg_arr(i,j,k,16) += tau12_cc * dt;
+            vel_t_avg_arr(i,j,k,17) += tau13_cc * dt;
+            vel_t_avg_arr(i,j,k,18) += tau23_cc * dt;
+            vel_t_avg_arr(i,j,k,19)  = tau11_cc;
+            vel_t_avg_arr(i,j,k,20)  = tau22_cc;
+            vel_t_avg_arr(i,j,k,21)  = tau33_cc;
+            vel_t_avg_arr(i,j,k,22)  = tau12_cc;
+            vel_t_avg_arr(i,j,k,23)  = tau13_cc;
+            vel_t_avg_arr(i,j,k,24)  = tau23_cc;
         });
     }
 }
