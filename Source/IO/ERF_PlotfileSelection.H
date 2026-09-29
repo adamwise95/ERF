@@ -234,7 +234,13 @@ plot3d_fixed_variable_available (const std::string& name,
     if (moist_status.governed) return moist_status.available;
 
     if (name == "u_t_avg" || name == "v_t_avg" || name == "w_t_avg" ||
-        name == "umag_t_avg") {
+        name == "umag_t_avg" || name == "tke_t_avg" || name == "tke" ||
+        name == "scalar_t_avg" || name == "up_t_avg" || name == "vp_t_avg" ||
+        name == "wp_t_avg" || name == "up" || name == "vp" || name == "wp" ||
+        name == "tau11_t_avg" || name == "tau22_t_avg" || name == "tau33_t_avg" ||
+        name == "tau12_t_avg" || name == "tau13_t_avg" || name == "tau23_t_avg" ||
+        name == "tau11" || name == "tau22" || name == "tau33" ||
+        name == "tau12" || name == "tau13" || name == "tau23") {
         return caps.time_average_storage;
     }
     if (plot3d_interval_mean_diagnostic(name)) {
