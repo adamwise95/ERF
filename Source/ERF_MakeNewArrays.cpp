@@ -263,7 +263,7 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     //       this may give poor statistics for dynamic mesh refinement.
     vel_t_avg[lev] = nullptr;
     if (solverChoice.time_avg_vel) {
-        vel_t_avg[lev] = std::make_unique<MultiFab>(ba, dm, 7, 0); // Each vel comp and the mag, TKE, and scalar
+        vel_t_avg[lev] = std::make_unique<MultiFab>(ba, dm, 13, 0); // Each vel comp and the mag, TKE, scalar, and velocity fluctuations
         vel_t_avg[lev]->setVal(zero);
         t_avg_cnt[lev] = zero;
     }

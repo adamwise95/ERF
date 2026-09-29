@@ -58,13 +58,19 @@ Time_Avg_Vel_atCC (double dt_d,
             // Scalar = RhoScalar / rho
             Real scalar_cc = cons_arr(i,j,k,RhoScalar_comp) / cons_arr(i,j,k,Rho_comp);
 
-            vel_t_avg_arr(i,j,k,0) += u_cc * dt;
-            vel_t_avg_arr(i,j,k,1) += v_cc * dt;
-            vel_t_avg_arr(i,j,k,2) += w_cc * dt;
-            vel_t_avg_arr(i,j,k,3) += umag_cc * dt;
-            vel_t_avg_arr(i,j,k,4) += tke * dt;
-            vel_t_avg_arr(i,j,k,5)  = tke;
-            vel_t_avg_arr(i,j,k,6) += scalar_cc * dt;
+            vel_t_avg_arr(i,j,k,0)  += u_cc * dt;
+            vel_t_avg_arr(i,j,k,1)  += v_cc * dt;
+            vel_t_avg_arr(i,j,k,2)  += w_cc * dt;
+            vel_t_avg_arr(i,j,k,3)  += umag_cc * dt;
+            vel_t_avg_arr(i,j,k,4)  += tke * dt;
+            vel_t_avg_arr(i,j,k,5)   = tke;
+            vel_t_avg_arr(i,j,k,6)  += scalar_cc * dt;
+            vel_t_avg_arr(i,j,k,7)  += up * dt;
+            vel_t_avg_arr(i,j,k,8)  += vp * dt;
+            vel_t_avg_arr(i,j,k,9)  += wp * dt;
+            vel_t_avg_arr(i,j,k,10)  = up;
+            vel_t_avg_arr(i,j,k,11)  = vp;
+            vel_t_avg_arr(i,j,k,12)  = wp;
         });
     }
 }

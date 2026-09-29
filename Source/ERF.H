@@ -1624,6 +1624,7 @@ private:
                                                     "mapfac", "lat_m", "lon_m",
                                                     // Time averaged velocity
                                                     "u_t_avg", "v_t_avg", "w_t_avg", "umag_t_avg", "tke_t_avg", "tke", "scalar_t_avg",
+                                                    "up_t_avg", "vp_t_avg", "wp_t_avg", "up", "vp", "wp",
                                                     // Interval means and resolved turbulence moments
                                                     "u_mean", "v_mean", "w_mean", "theta_mean",
                                                     "uu_mean", "vv_mean", "ww_mean", "uw_mean", "vw_mean", "wtheta_mean",
