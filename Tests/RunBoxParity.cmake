@@ -4,6 +4,7 @@
 # amr.refine_grid_layout splits even a single box.
 # -DX= defines X as empty, so test for a value, not for DEFINED
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ResolveExecutable.cmake")
 
 foreach(arg NRANKS TEST_EXE INPUT WORKING_DIRECTORY FCOMPARE PLTFILE RTOL ATOL)
     if("${${arg}}" STREQUAL "")
@@ -13,6 +14,13 @@ endforeach()
 if(NOT "${MPIEXEC}" STREQUAL "" AND "${MPIEXEC_NUMPROC_FLAG}" STREQUAL "")
     message(FATAL_ERROR "RunBoxParity.cmake: MPIEXEC_NUMPROC_FLAG must be given with MPIEXEC")
 endif()
+
+# On Windows the executables are named with a wildcard for the config subdirectory
+# a multi-config generator picks; execute_process does not expand it.
+erf_resolve_executable(TEST_EXE "${TEST_EXE}" CONFIG "${CONFIG}"
+    CONTEXT "RunBoxParity.cmake: ERF executable")
+erf_resolve_executable(FCOMPARE "${FCOMPARE}" CONFIG "${CONFIG}"
+    CONTEXT "RunBoxParity.cmake: fcompare")
 
 separate_arguments(common_options    UNIX_COMMAND "${COMMON_OPTIONS}")
 separate_arguments(reference_options UNIX_COMMAND "${REFERENCE_OPTIONS}")
@@ -109,8 +117,13 @@ if(NOT "${DATALOG}" STREQUAL "")
         message(FATAL_ERROR "RunBoxParity.cmake: data log ${DATALOG} has ${ref_lines} lines; the comparison would be trivial")
     endif()
     include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
-    # datprecision in Source/ERF.H, and a couple of units of the last digit of tolerance
-    erf_compare_data_logs("${REF_DIR}/${DATALOG}" "${SPLIT_DIR}/${DATALOG}" 6 2 logs_agree log_message)
+    # datprecision in Source/ERF.H, and a couple of units of the last digit of tolerance.
+    # Station time series (Source/IO/ERF_StationSampler.cpp) print more digits, so the
+    # caller can raise the number of significant digits that must agree.
+    if("${DATALOG_SIGDIGITS}" STREQUAL "")
+        set(DATALOG_SIGDIGITS 6)
+    endif()
+    erf_compare_data_logs("${REF_DIR}/${DATALOG}" "${SPLIT_DIR}/${DATALOG}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message)
     if(NOT logs_agree)
         message(FATAL_ERROR "RunBoxParity.cmake: data log ${DATALOG} differs between the single-box "
                             "and split runs: ${log_message}")

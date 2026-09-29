@@ -57,6 +57,8 @@
 #include <ERF_WallScalarBC.H>
 #include <ERF_FillPatcher.H>
 #include <ERF_SampleData.H>
+#include <ERF_StationSampler.H>
+#include <ERF_ObsNudging.H>
 #include <ERF_ForestDrag.H>
 #include <ERF_IBFaceSet.H>
 #include <ERF_Provenance.H>
@@ -68,11 +70,13 @@
 #include "ERF_EulerianMicrophysics.H"
 #include "ERF_LagrangianMicrophysics.H"
 #include "ERF_LandSurface.H"
+#include "ERF_Urban.H"
 #include "ERF_TwoStreamRadiation.H"
 
 #ifdef ERF_USE_WINDFARM
 #include "ERF_WindFarm.H"
 #endif
+#include <ERF_SurfaceModel.H>
 
 #include <ERF_RadiationModels.H>
 
@@ -81,6 +85,7 @@
 #endif
 
 #include "ERF_ShocDriver.H"
+#include "AuxiliaryState/ERF_AuxiliaryInertTracer.H"
 
 #ifdef ERF_USE_P3
 #include "ERF_P3Interface.H"
@@ -101,18 +106,16 @@ using amrex::MPI_Comm;
 class MultiBlockContainer;
 #endif
 
+// Describes one component of a 2D plotfile; defined in
+// IO/ERF_Plotfile2DSampledLevel.H, which ERF.H does not need to include.
+namespace plotfile2d { struct Plotfile2DOutputDescriptor; }
+namespace erf_sbm { class SBMStateManager; }
+
 /**
  * Enum of possible interpolation types between coarse/fine
 */
 AMREX_ENUM(StateInterpType,
     FullState, Perturbational
-);
-
-/**
- * Enum of possible plotfile types
-*/
-AMREX_ENUM(PlotFileType,
-    None, Amrex, Netcdf
 );
 
 /**
@@ -165,20 +168,16 @@ public:
     // used to build ocean->atmos remap weights. Sets both to nullptr if
     // unavailable (e.g. idealized/non-WRF configurations).
     //
-    // Staggering contract: both MultiFabs always carry CELL index type, but what
-    // they actually hold depends on the init path, and a caller building a corner
-    // mesh must account for the difference:
-    //   * init_from_wrfinput reads WRF's XLONG_U / XLAT_V, which are edge
-    //     staggered. lon_m(i,j) is the longitude of the west face of cell (i,j)
-    //     -- nodal in i, cell-centred in j -- and lat_m(i,j) is the latitude of
-    //     the south face -- nodal in j, cell-centred in i. The extra staggered
-    //     edge (lon_m at i = nx, lat_m at j = ny) lives in the first ghost cell,
-    //     so a corner mesh must read one ghost beyond the valid box in the nodal
-    //     direction; ghosts further out are duplicates of that edge.
-    //   * init_from_metgrid reads XLONG_M / XLAT_M, which are mass-point values,
-    //     so both are genuinely cell-centred and there is no staggered edge.
-    void GetOceanToAtmosCornerCoordinates (const amrex::MultiFab*& x_corner,
-                                           const amrex::MultiFab*& y_corner) const;
+    // Staggering contract: both MultiFabs carry CELL index type and hold
+    // mass-point values whichever init path filled them -- init_from_wrfinput
+    // reads WRF's XLONG / XLAT and init_from_metgrid reads XLONG_M / XLAT_M.
+    // Ghost cells at the domain boundary are clamped copies of the edge cell,
+    // not extrapolations. These are not corners: a caller building a corner
+    // mesh must derive the corners itself. The name says cell centers so that a
+    // caller written against the old edge-staggered contract fails to compile
+    // instead of silently building its mesh half a cell off.
+    void GetOceanToAtmosCellCenterLonLat (const amrex::MultiFab*& lon_cc,
+                                          const amrex::MultiFab*& lat_cc) const;
 
     // Returns the level-0, current-time land mask (1 = land, 0 = water) used
     // by the driver to exclude land cells from atmos->ocean remap stencils.
@@ -435,6 +434,13 @@ public:
     bool writeNow (double cur_time, const int nstep, const int plot_int,
                    const double plot_per, const double dt_0, double& last_file_time);
 
+    //! True when a level cannot sweep radiation itself -- no box on it holds a whole
+    //! column -- and so takes its radiation fields by interpolation from its parent.
+    [[nodiscard]] bool rad_level_needs_interpolation (int lev) const;
+
+    //! Fill a newly built level's two-stream SEB state from its parent
+    void fill_seb_from_coarse (int lev);
+
     // Called after every level 0 timestep
     void post_timestep (int nstep, double time, double dt_lev);
 
@@ -597,6 +603,15 @@ public:
                       const double& time,
                       const double& dt_advance);
 
+    void advance_urban (int lev,
+                        amrex::MultiFab& cons_in,
+                        amrex::MultiFab& u_in,
+                        amrex::MultiFab& v_in,
+                        const amrex::Real& dt_advance,
+                        const amrex::Geometry& geom,
+                        const amrex::MultiFab* z_phys_nd,
+                        amrex::MultiFab& eddyDiffs_in);
+
     void advance_radiation (int lev,
                             amrex::MultiFab& cons_in,
                             const double& dt_advance);
@@ -680,6 +695,59 @@ public:
                                                 const std::string &versionName,
                                                 const std::string &levelPrefix,
                                                 const std::string &mfPrefix) const;
+
+    // Filling the plot variables, and the station sampling that reuses it.  Split
+    // out of the plotfile writers so that a station column and the corresponding
+    // plotfile component are produced the same way.  Private for the same reason
+    // canonicalizePlot3DVariables above is: this is output machinery rather than
+    // something ERF offers a caller.
+
+    // Per-level scratch needed to evaluate the 3D plot variables.  Held by the
+    // caller so that the work is done once for a set of variables and then
+    // reused for every level that is filled.
+    struct Plot3DScratch
+    {
+        amrex::Vector<amrex::MultiFab> mf_cc_vel;   // cell-centered velocity, 1 ghost
+        amrex::Vector<amrex::MultiFab> mf_cc_tau;   // cell-centered stress tensor
+        amrex::Vector<amrex::MultiFab> mf_cc_fx;    // cell-centered SFS fluxes
+    };
+
+    void FillPlot2DVars (int lev,
+                         const amrex::Vector<std::string>& plot_var_names,
+                         const amrex::Vector<std::string>& varnames,
+                         const amrex::Vector<plotfile2d::Plotfile2DOutputDescriptor>& output_descriptors,
+                         amrex::MultiFab& mf_dst,
+                         int ncomp_mf);
+
+    void FillPlot3DVars (int lev,
+                         const amrex::Vector<std::string>& plot_var_names,
+                         Plot3DScratch& scratch,
+                         amrex::MultiFab& mf_dst,
+                         int ncomp_mf,
+                         amrex::Real tnew);
+
+    // max_lev caps the levels whose scratch is built, -1 meaning every level: a
+    // caller that reads only the coarse levels should not pay for the fine ones.
+    // sync_solution allows the microphysics average-down, which the plotfile
+    // writer wants but a diagnostic that runs at every step must not do, since
+    // it changes the coarse solution.
+    void BuildPlot3DScratch (const amrex::Vector<std::string>& plot_var_names,
+                             Plot3DScratch& scratch,
+                             int max_lev = -1,
+                             bool sync_solution = true);
+
+    // Station time-series output
+    void init_stations ();
+    void resolve_station_positions ();
+    void resolve_station_stencils ();
+    void sample_stations (amrex::Real time);
+    void flush_stations () const;
+    // The nodes a station's terrain elevation is read from, at k = the bottom of
+    // the domain: z_phys_nd, or with immersed-forcing terrain the immersed surface
+    const amrex::MultiFab& station_ground (int lev);
+
+    // Nudging towards observations at stations
+    void init_obs_nudging ();
 
     void erf_enforce_hse (int lev,
                           amrex::MultiFab& dens, amrex::MultiFab& pres, amrex::MultiFab& pi,
@@ -957,7 +1025,9 @@ private:
     void make_physbcs (int lev);
 
     // (Re)build the land surface model on this level's current grids
-    void make_lsm_at_level (int lev, bool from_regrid [[maybe_unused]] = false);
+    void make_lsm_at_level (int lev, bool from_regrid = false,
+                            int source_lev = -1, bool source_is_raw_input = false,
+                            bool initialize_now = false);
 
     // Initialize the microphysics object
     void initializeMicrophysics (const int&);
@@ -1044,6 +1114,9 @@ private:
 
     // set which variables and derived quantities go into plotfiles
     void setPlotVariables (const std::string& pp_plot_var_names, amrex::Vector<std::string>& plot_var_names);
+    void canonicalizePlot3DVariables (amrex::Vector<std::string>& plot_var_names);
+    void appendPlot3DVariables (const amrex::Vector<std::string>& plot_var_names,
+                                amrex::Vector<std::string>& a_plot_var_names);
     void setPlotVariables2D (const std::string& pp_plot_var_names, amrex::Vector<std::string>& plot_var_names);
     // append variables to plot
     void appendPlotVariables (const std::string& pp_plot_var_names, amrex::Vector<std::string>& plot_var_names);
@@ -1092,7 +1165,11 @@ private:
 
 #endif // ERF_USE_NETCDF
 
-    amrex::Vector<std::unique_ptr<amrex::MultiFab>> lat_m, lon_m;       // Latitude and Longitude on the grid
+    // Latitude and Longitude on the grid, always at cell centers: the wrfinput
+    // path reads XLAT / XLONG and the metgrid path reads XLAT_M / XLONG_M, both
+    // of which are mass-point values, so a consumer that wants the mass point
+    // can use these directly.
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> lat_m, lon_m;
 
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> sinPhi_m, cosPhi_m; // Coriolis factors on the grid
 
@@ -1219,9 +1296,12 @@ private:
     amrex::Vector<amrex::MultiFab> zmom_crse_rhs;
 
     std::unique_ptr<Microphysics> micro;
+    std::unique_ptr<erf_sbm::SBMStateManager> sbm_state_manager;
+    std::unique_ptr<erf_auxiliary::AuxiliaryInertTracer> auxiliary_inert_tracer;
     std::unique_ptr<CloudChamberBudget> cloud_chamber_budget;
     erf_cloud_chamber::Config cloud_chamber_config;
     amrex::Vector<amrex::Vector<amrex::MultiFab*>> qmoist; // (lev,ncomp) rain_accum, snow_accum, graup_accum
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> precip; // SLM precipitation-rate scratch
 
     // Variables for wind farm parametrization models
 
@@ -1236,11 +1316,17 @@ private:
                                                    // velocity upstream of the turbine
 #endif
 
+    std::unique_ptr<SurfaceModel> m_SurfaceModel = nullptr;
+
     LandSurface lsm;
+    Urban urban;
     amrex::Vector<std::string> lsm_data_name;                // (ncomp) -- e.g., sw_dn_dir/dif_vis/nir, lw_dn, cos_zen
     amrex::Vector<amrex::Vector<amrex::MultiFab*>> lsm_data; // (lev,ncomp) Data for LSM coupling
     amrex::Vector<std::string> lsm_flux_name;                // (ncomp) -- e.g., hfx3, q1fx3, tau13, tau23
     amrex::Vector<amrex::Vector<amrex::MultiFab*>> lsm_flux; // (lev,ncomp) Fluxes from LSM needed by DYCORE
+    amrex::Vector<amrex::Vector<amrex::MultiFab*>> urban_data; // (lev,ncomp) Data for urban coupling
+    amrex::Vector<std::string> urban_data_name;                // (ncomp) Urban coupling field names
+    amrex::Vector<amrex::Vector<amrex::MultiFab*>> urban_flux; // (lev,ncomp) Fluxes from urban model
 
     LargeScaleForcingData lsf;
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> nudge_data; // holds nudging inputs: tnudge, qnudge, unudge, vnudge
@@ -1254,6 +1340,9 @@ private:
     // the z-ghost cell k = khi + 1, so the array has one ghost cell in z.
     // Both RRTMGP and the two-stream model fill all nz + 1 levels.
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> rad_fluxes;
+
+    amrex::Real solar_declin = 0.0;
+    amrex::Real calday = 0.0;
 
     // Two-stream radiation model (erf.radiation_model = TwoStream): owns its
     // surface and SEB state; every call from ERF is behind a test of
@@ -1493,6 +1582,7 @@ private:
     bool m_plot_face_terrain_blanking = false;
 
     bool plot_lsm = false;
+    bool plot_surfmodel = false;
 
     // other sampling output control
     int profile_int = -1;
@@ -2065,6 +2155,21 @@ private:
     amrex::Real plane_sampling_per = -one;
     std::unique_ptr<LineSampler> line_sampler = nullptr;
     std::unique_ptr<PlaneSampler> plane_sampler = nullptr;
+
+    // Station time-series output
+    int station_sampling_interval = -1;
+    amrex::Real station_sampling_per = -one;
+    std::unique_ptr<StationSampler> station_sampler = nullptr;
+    // The 3D and 2D plot variables the stations need, in the order the fill
+    // routines produce their components
+    amrex::Vector<std::string> station_vars_3d;
+    amrex::Vector<std::string> station_vars_2d;
+    // The immersed-forcing terrain surface under each level's grids, for the stations
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> station_ib_ground;
+
+    // Nudging towards observations at stations; built only when
+    // solverChoice.nudging_from_observations is true
+    std::unique_ptr<ObsNudging> obs_nudging = nullptr;
 
     amrex::Vector<std::unique_ptr<std::fstream> >       datalog;
     amrex::Vector<std::unique_ptr<std::fstream> >   der_datalog;
