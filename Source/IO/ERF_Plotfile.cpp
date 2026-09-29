@@ -1205,6 +1205,42 @@ ERF::FillPlot3DVars (int lev,
         if (containerHasElement(plot_var_names, "v_t_avg")) copy_time_average(1);
         if (containerHasElement(plot_var_names, "w_t_avg")) copy_time_average(2);
         if (containerHasElement(plot_var_names, "umag_t_avg")) copy_time_average(3);
+
+        if (containerHasElement(plot_var_names, "tke_t_avg")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                const Real norm = t_avg_cnt[lev];
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,4) / norm;
+                });
+            }
+            mf_comp ++;
+        }
+
+        if (containerHasElement(plot_var_names, "tke")) {
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.tilebox();
+                const Array4<Real>& derdat = mf_dst.array(mfi);
+                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    derdat(i ,j ,k, mf_comp) = data(i,j,k,5);
+                });
+            }
+            mf_comp ++;
+        }
+
     }
 
     if (solverChoice.compute_mean_vars) {
