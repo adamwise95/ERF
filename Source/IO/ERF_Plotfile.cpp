@@ -1205,24 +1205,7 @@ ERF::FillPlot3DVars (int lev,
         if (containerHasElement(plot_var_names, "v_t_avg")) copy_time_average(1);
         if (containerHasElement(plot_var_names, "w_t_avg")) copy_time_average(2);
         if (containerHasElement(plot_var_names, "umag_t_avg")) copy_time_average(3);
-
-        if (containerHasElement(plot_var_names, "tke_t_avg")) {
-#ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-#endif
-            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& derdat = mf_dst.array(mfi);
-                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
-                const Real norm = t_avg_cnt[lev];
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-                {
-                    derdat(i ,j ,k, mf_comp) = data(i,j,k,4) / norm;
-                });
-            }
-            mf_comp ++;
-        }
+        if (containerHasElement(plot_var_names, "tke_t_avg")) copy_time_average(4);
 
         if (containerHasElement(plot_var_names, "tke")) {
 #ifdef _OPENMP
@@ -1241,77 +1224,10 @@ ERF::FillPlot3DVars (int lev,
             mf_comp ++;
         }
 
-        if (containerHasElement(plot_var_names, "scalar_t_avg")) {
-#ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-#endif
-            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& derdat = mf_dst.array(mfi);
-                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
-                const Real norm = t_avg_cnt[lev];
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-                {
-                    derdat(i ,j ,k, mf_comp) = data(i,j,k,6) / norm;
-                });
-            }
-            mf_comp ++;
-        }
-
-        if (containerHasElement(plot_var_names, "up_t_avg")) {
-#ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-#endif
-            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& derdat = mf_dst.array(mfi);
-                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
-                const Real norm = t_avg_cnt[lev];
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-                {
-                    derdat(i ,j ,k, mf_comp) = data(i,j,k,7) / norm;
-                });
-            }
-            mf_comp ++;
-        }
-
-        if (containerHasElement(plot_var_names, "vp_t_avg")) {
-#ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-#endif
-            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& derdat = mf_dst.array(mfi);
-                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
-                const Real norm = t_avg_cnt[lev];
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-                {
-                    derdat(i ,j ,k, mf_comp) = data(i,j,k,8) / norm;
-                });
-            }
-            mf_comp ++;
-        }
-
-        if (containerHasElement(plot_var_names, "wp_t_avg")) {
-#ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-#endif
-            for ( MFIter mfi(mf_dst,TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.tilebox();
-                const Array4<Real>& derdat = mf_dst.array(mfi);
-                const Array4<Real>& data   = vel_t_avg[lev]->array(mfi);
-                const Real norm = t_avg_cnt[lev];
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-                {
-                    derdat(i ,j ,k, mf_comp) = data(i,j,k,9) / norm;
-                });
-            }
-            mf_comp ++;
-        }
+        if (containerHasElement(plot_var_names, "scalar_t_avg")) copy_time_average(6);
+        if (containerHasElement(plot_var_names, "up_t_avg")) copy_time_average(7);
+        if (containerHasElement(plot_var_names, "vp_t_avg")) copy_time_average(8);
+        if (containerHasElement(plot_var_names, "wp_t_avg")) copy_time_average(9);
 
         if (containerHasElement(plot_var_names, "up")) {
 #ifdef _OPENMP
