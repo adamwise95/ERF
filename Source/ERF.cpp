@@ -59,6 +59,7 @@ double ERF::low_time_interval  = std::numeric_limits<double>::max();
 Real ERF::cfl            = Real(0.8);
 Real ERF::sub_cfl        = one;
 Real ERF::init_shrink    = one;
+Real ERF::regrid_shrink  = one;
 Real ERF::change_max     = Real(1.1);
 double ERF::dt_max_initial = static_cast<double>(bogus_large_value);
 double ERF:: dt_max        = 1.0e9;
@@ -2989,9 +2990,13 @@ ERF::ReadParameters ()
         pp.queryAdd("cfl", cfl);
         pp.queryAdd("substepping_cfl", sub_cfl);
         pp.queryAdd("init_shrink", init_shrink);
+        pp.queryAdd("regrid_shrink", regrid_shrink);
         pp.queryAdd("change_max", change_max);
         pp.queryAdd("dt_max_initial", dt_max_initial);
         pp.queryAdd("dt_max", dt_max);
+
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(regrid_shrink > zero && regrid_shrink <= one,
+            "erf.regrid_shrink must be in (0,1]");
 
         fixed_dt.resize(max_level+1,-one);
         fixed_fast_dt.resize(max_level+1,-one);

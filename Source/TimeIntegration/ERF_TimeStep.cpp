@@ -246,6 +246,24 @@ ERF::timeStep (int lev, double time, int /*iteration*/)
                     dt[k] = dt[k-1] / static_cast<double>(nsubsteps[k]);
                 }
 
+                // init_shrink is intentionally a start-up-only control.  A
+                // level created after the run has developed can nevertheless
+                // need the same short acoustic adjustment.  When level 0
+                // creates a new finer level, reduce this *coarse* step and
+                // rebuild the subcycled hierarchy so all levels still end at
+                // the same synchronization time.  ComputeDt on the following
+                // coarse steps restores dt subject to change_max.
+                if (lev == 0 && finest_level > old_finest && regrid_shrink < one) {
+                    dt[0] *= regrid_shrink;
+                    for (int k = 1; k <= finest_level; ++k) {
+                        dt[k] = dt[k-1] / static_cast<double>(nsubsteps[k]);
+                    }
+                    if (verbose) {
+                        amrex::Print() << "New AMR level: shrink coarse dt by "
+                                       << regrid_shrink << " for acoustic adjustment\n";
+                    }
+                }
+
                 // The terrain under each regridded level has moved with its
                 // grids.  Find it now, as start-up does, so that a level the
                 // nudging cannot handle (on a terrain-fitted mesh, one whose
