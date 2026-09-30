@@ -29,6 +29,9 @@ private:
                                                             const amrex::Real, const double,
                                                             const double)> acoustic_substepping;
 
+   /** Optional diagnostics called after each MRI segment. */
+    std::function<void(T const&, int, int, int)> stage_check;
+
    /**
     * \brief Integrator timestep size (Real)
     */
@@ -199,6 +202,16 @@ public:
     }
 
     /**
+     * @brief Set an optional state checker for MRI debugging.
+     * Arguments are (state, RK stage, fast substep, phase), where phase is
+     * 0 after slow-pre, 1 after a fast substep, and 2 after slow-post.
+     */
+    void set_stage_check (std::function<void(T const&, int, int, int)> F)
+    {
+        stage_check = F;
+    }
+
+    /**
      * @brief Set the ratio of slow to fast timestep sizes.
      * @param[in] timestep_ratio Ratio of slow/fast timesteps.
      */
@@ -299,6 +312,10 @@ public:
           // RK3 for compressible integrator
           for (int nrk = 0; nrk < 3; nrk++)
           {
+            // Check the stage data before slow_rhs_pre converts its grown
+            // conserved state to primitives and applies stress stencils.
+            if (stage_check) { stage_check(S_new, nrk, -1, -1); }
+
             // Capture the time we got to in the previous RK step
             old_time_stage = time_stage;
 
@@ -340,6 +357,7 @@ public:
             // step 3 starts with S_stage = S^** and we always start substepping at the old time
 
             slow_rhs_pre(*F_slow, S_old, S_new, time, old_time_stage, time_stage, nrk);
+            if (stage_check) { stage_check(*F_slow, nrk, -1, 0); }
 
             amrex::Real inv_fac = one / static_cast<amrex::Real>(nsubsteps);
 
@@ -355,6 +373,7 @@ public:
                 {
                     acoustic_substepping(ks, nsubsteps, nrk, *F_slow, S_old, S_new, *S_sum, dtau, timestep, inv_fac,
                                          time + ks*dtau, time + (ks+1) * dtau);
+                    if (stage_check) { stage_check(*S_sum, nrk, ks, 1); }
 
                 } // ks
 
@@ -370,6 +389,7 @@ public:
             //      (because we did    update the fast variables in the substepping)
             // ****************************************************
             slow_rhs_post(*F_slow, S_old, S_new, *S_sum, time, old_time_stage, time_stage, nrk);
+            if (stage_check) { stage_check(S_new, nrk, -1, 2); }
           } // nrk
 
         } else {
@@ -389,6 +409,8 @@ public:
 
             for (int nrk = 0; nrk < 2; nrk++)
             {
+                if (stage_check) { stage_check(S_new, nrk, -1, -1); }
+
                 // Capture the time we got to in the previous RK step
                 old_time_stage = time_stage;
 
@@ -398,8 +420,10 @@ public:
                 time_stage = time + nsubsteps * dtau;
 
                 slow_rhs_pre(*F_slow, S_old, S_new, time, old_time_stage, time_stage, nrk);
+                if (stage_check) { stage_check(*F_slow, nrk, -1, 0); }
 
                 no_substep(*S_sum, S_old, *F_slow, time + nsubsteps*dtau, nsubsteps*dtau, nrk);
+                if (stage_check) { stage_check(*S_sum, nrk, 0, 1); }
 
                 // ****************************************************
                 // Evaluate F_slow(S_stage) only for the slow variables
@@ -409,6 +433,7 @@ public:
                 //      (because we did    update the fast variables in the substepping)
                 // ****************************************************
                 slow_rhs_post(*F_slow, S_old, S_new, *S_sum, time, old_time_stage, time_stage, nrk);
+                if (stage_check) { stage_check(S_new, nrk, -1, 2); }
             } // nrk
         }
 

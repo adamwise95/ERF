@@ -765,6 +765,67 @@ void ERF::advance_dycore (int level,
     mri_integrator.set_slow_fast_timestep_ratio(fixed_mri_dt_ratio > 0 ? fixed_mri_dt_ratio : dt_mri_ratio[level]);
     mri_integrator.set_no_substep(no_substep_fun);
 
+    // Level-by-level checks after every MRI segment are expensive, so reserve
+    // them for explicit debugging.  The momentum entries are checked as if
+    // they were velocities: check_vels_for_nans only tests finiteness, which
+    // is exactly what is needed for these temporary conserved momenta.
+    if (check_for_nans > 2) {
+        mri_integrator.set_stage_check(
+            [this, level, &xvel_new, &yvel_new, &zvel_new]
+            (Vector<MultiFab> const& state, int nrk, int substep, int phase)
+            {
+                const char* phase_name = (phase < 0) ? "RK-stage input" :
+                                         (phase == 0) ? "slow RHS" :
+                                         (phase == 1) ? "fast substep" : "slow update";
+                amrex::Print() << "Checking level " << level << " after " << phase_name
+                               << " (RK stage " << nrk;
+                if (substep >= 0) { amrex::Print() << ", fast substep " << substep; }
+                amrex::Print() << ") for NaNs\n";
+                check_state_for_nans(state[IntVars::cons]);
+                check_vels_for_nans(state[IntVars::xmom], state[IntVars::ymom],
+                                    state[IntVars::zmom]);
+
+                // A finite *state* is not sufficient for the compressible
+                // pressure calculation: make_pi_stage takes a fractional
+                // power of rho-theta.  Do not apply this test to phase 0,
+                // which holds F_slow (an RHS whose entries may legitimately
+                // be positive or negative).
+                if (phase != 0) {
+                    const Real min_rho = state[IntVars::cons].min(Rho_comp, 0);
+                    const Real min_rhotheta = state[IntVars::cons].min(RhoTheta_comp, 0);
+                    if (min_rho <= zero || min_rhotheta <= zero) {
+                        amrex::Print() << "Non-positive thermodynamic state at level " << level
+                                       << " before/after MRI phase " << phase_name
+                                       << " (RK stage " << nrk << "): min(rho) = " << min_rho
+                                       << ", min(rhoTheta) = " << min_rhotheta << "\n";
+                        amrex::Abort("Non-positive rho or rhoTheta before Exner-pressure evaluation");
+                    }
+                }
+
+                // The MRI state holds momenta, while slow_rhs_pre uses these
+                // separately stored face velocities.  They are rebuilt by
+                // apply_bcs after each stage, so check them independently.
+                // In particular, this identifies a bad late-level
+                // FillIntermediatePatch before it is consumed by stage 2.
+                if (xvel_new.contains_nan(0, 1, 0) ||
+                    yvel_new.contains_nan(0, 1, 0) ||
+                    zvel_new.contains_nan(0, 1, 0)) {
+                    amrex::Print() << "Face velocity contains NaNs at level " << level
+                                   << " before/after MRI phase " << phase_name
+                                   << " (RK stage " << nrk << ")\n";
+                    amrex::Abort("NaN detected in face velocity during MRI integration");
+                }
+
+                const int ng_state = state[IntVars::cons].nGrow();
+                if (state[IntVars::cons].contains_nan(0, state[IntVars::cons].nComp(), ng_state) ||
+                    state[IntVars::xmom].contains_nan(0, 1, state[IntVars::xmom].nGrow()) ||
+                    state[IntVars::ymom].contains_nan(0, 1, state[IntVars::ymom].nGrow()) ||
+                    state[IntVars::zmom].contains_nan(0, 1, state[IntVars::zmom].nGrow())) {
+                    amrex::Abort("NaN detected in MRI stage data or its ghost cells");
+                }
+            });
+    }
+
     mri_integrator.advance(state_old, state_new, old_time, dt_advance);
 
     if (verbose) Print() << "Done with advance_dycore at level " << level << std::endl;

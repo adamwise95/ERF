@@ -184,6 +184,21 @@ auto acoustic_substepping_fun = [&,one_d=one,zero_d=zero](int fast_step, int n_s
                            (l_rayleigh_implicit) ? d_sinesq_stag_ptrs[level].data() : nullptr, l_damp_coef);
         }
 
+        // Distinguish a bad fast update from a bad coarse-fine fill.  The
+        // FillIntermediatePatch below can alter interface-valid data, so an
+        // MRI check after it cannot tell which operation first crossed zero.
+        if (check_for_nans > 2) {
+            const Real min_rho_before_fill = S_data[IntVars::cons].min(Rho_comp, 0);
+            const Real min_rhotheta_before_fill = S_data[IntVars::cons].min(RhoTheta_comp, 0);
+            if (min_rho_before_fill <= zero_d || min_rhotheta_before_fill <= zero_d) {
+                amrex::Print() << "Non-positive thermodynamic state immediately after level " << level
+                               << " fast update (RK stage " << nrk << ", fast substep " << fast_step
+                               << "): min(rho) = " << min_rho_before_fill
+                               << ", min(rhoTheta) = " << min_rhotheta_before_fill << "\n";
+                amrex::Abort("Fast update produced non-positive rho or rhoTheta before FillIntermediatePatch");
+            }
+        }
+
         // Even if we update all the conserved variables we don't need
         // to fillpatch the slow ones every acoustic substep
 
