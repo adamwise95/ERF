@@ -67,6 +67,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    theory/PBLschemes.rst
    theory/Forcings.rst
    theory/WindFarmModels.rst
+   theory/FireCoupling.rst
    theory/Radiation.rst
    Particles.rst
    SuperDroplets.rst
@@ -84,6 +85,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    Meshing.rst
    MapFactors.rst
    TimeAdvance.rst
+   AuxiliaryState.rst
    Discretizations.rst
    LinearSolvers.rst
    MeshRefinement.rst

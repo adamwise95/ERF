@@ -49,7 +49,7 @@ SAM::Init (const MultiFab& cons_in,
     m_detJ_cc   = detJ_cc.get();
 
     MicVarMap.resize(m_qmoist_size);
-    MicVarMap = {MicVar::rain_accum, MicVar::snow_accum, MicVar::graup_accum};
+    MicVarMap = {MicVar::rain_accum, MicVar::snow_accum, MicVar::graupel_accum, MicVar::precip_accum};
 
     // initialize microphysics variables
     for (auto ivar = 0; ivar < MicVar::NumVars; ++ivar) {
@@ -57,6 +57,9 @@ SAM::Init (const MultiFab& cons_in,
                                                         1, cons_in.nGrowVect());
         mic_fab_vars[ivar]->setVal(0.);
     }
+
+    m_sed.define(cons_in.boxArray(), cons_in.DistributionMap(),
+                 {RhoQ4_comp, RhoQ5_comp, RhoQ6_comp, RhoQ3_comp});
 
     // NOTE: For multi-level not all ranks will own a box.
     //       Furthermore, the plane average allocates space
@@ -244,8 +247,7 @@ void SAM::Compute_Coefficients (const bool use_anelastic_reference_pressure)
     });
 
     if(round(gam3) != 2) {
-        std::cout << "cannot compute gamma-function in Microphysics::Init" << std::endl;
-        std::exit(-1);
+        amrex::Abort("cannot compute gamma-function in Microphysics::Init");
     }
 
     // Populate all the coefficients

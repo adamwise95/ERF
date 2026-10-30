@@ -42,10 +42,10 @@ struct NCDim
     const int dimid;
 
     //! Name of this dimension
-    [[nodiscard]] std::string name() const;
+    [[nodiscard]] std::string name () const;
 
     //! Length of this dimension
-    [[nodiscard]] size_t len() const;
+    [[nodiscard]] size_t len () const;
 };
 
 //! Representation of a NetCDF variable
@@ -305,6 +305,13 @@ public:
                             const int cmode = NC_NOWRITE,
                             MPI_Comm comm = MPI_COMM_WORLD,
                             MPI_Info info = MPI_INFO_NULL);
+
+    // The file owns its NetCDF ID and closes it on destruction, so it cannot be copied.
+    //    Moving hands the open file to the new object
+    NCFile (const NCFile&) = delete;
+    NCFile& operator= (const NCFile&) = delete;
+    NCFile (NCFile&& other) noexcept : NCGroup(other.ncid), is_open{other.is_open} { other.is_open = false; }
+    NCFile& operator= (NCFile&&) = delete;
 
     ~NCFile ();
 

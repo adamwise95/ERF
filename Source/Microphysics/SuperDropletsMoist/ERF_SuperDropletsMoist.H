@@ -29,8 +29,9 @@ namespace MicVar_SD {
         rh_w,        /*!< relative humidity (water) */
         rh_i,        /*!< relative humidity (ice) */
         rain_accum,  /*!< rain accumulation (mm) */
-        graup_accum,  /*!< graupel accumulation (mm) */
+        graupel_accum,  /*!< graupel accumulation (mm) */
         snow_accum,  /*!< snow accumulation (mm) */
+        precip_accum,  /*!< precipitation accumulation, liquid and ice (mm of liquid water) */
         NumVars
     };
 }
@@ -133,9 +134,9 @@ class SuperDropletsMoist : public NullMoistLagrangian {
     public:
 
         /*! \brief Constructor */
-        SuperDropletsMoist()
+        SuperDropletsMoist ()
         {
-            m_qmoist_size = 11;
+            m_qmoist_size = 12;
             m_qstate_moist_size = 6; // qv, qc, qi, qrain, qsnow, qgraup
             m_qstate_nonmoist_size = -1; // sentinel; readInputs() sets the actual count before construction returns
             m_name = "super_droplets_moisture";
@@ -146,7 +147,7 @@ class SuperDropletsMoist : public NullMoistLagrangian {
         }
 
         /*! \brief Destructor */
-        virtual ~SuperDropletsMoist() = default;
+        virtual ~SuperDropletsMoist () = default;
 
         /*! \brief Define super-droplet moisture model parameters */
         virtual void Define (SolverChoice&) override;
@@ -166,9 +167,9 @@ class SuperDropletsMoist : public NullMoistLagrangian {
         virtual void RestartParticles ( amrex::ParGDBBase*, const std::string& ) override;
 
         /*! \brief finish initializations */
-        virtual void FinishInit(const int&,
-                                amrex::MultiFab&,
-                                const amrex::Vector<MFPtr>&) override;
+        virtual void FinishInit (const int&,
+                                 amrex::MultiFab&,
+                                 const amrex::Vector<MFPtr>&) override;
 
         void Advance ( const amrex::Real&, const SolverChoice& ) override
         {
@@ -286,12 +287,12 @@ class SuperDropletsMoist : public NullMoistLagrangian {
         }
 
         /*! \brief returns pointer to super-droplets particle container */
-        inline virtual ERFPC* getParticleContainer() override
+        inline virtual ERFPC* getParticleContainer () override
         {
             return m_super_droplets;
         }
 
-        inline virtual const std::string& getName() const override
+        inline virtual const std::string& getName () const override
         {
             return m_name;
         }
@@ -544,7 +545,7 @@ class SuperDropletsMoist : public NullMoistLagrangian {
         SuperDropletPC* m_super_droplets;
 
         /*! \brief read inputs */
-        virtual void readInputs();
+        virtual void readInputs ();
 
     private:
 

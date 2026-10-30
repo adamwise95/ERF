@@ -9,13 +9,17 @@
 #include "ERF_Plotfile2DPrecip.H"
 #include "ERF_Plotfile2DWaterPath.H"
 #include "ERF_NCPlotFile.H"
+#include "ERF_NoahMPGitHash.H"
 #include "ERF_Plotfile2DUtils.H"
 #include "Diagnostics/ERF_NearSurfaceDiagnostics.H"
 #include "ERF_EpochTime.H"
+#include "ERF_LatLonMap.H"
 #include "ERF_SrcHeaders.H"
 #include "ERF_StormDiagnostics.H"
+#include "ERF_SurfaceTemperature.H"
 #include "ERF_TerrainMetrics.H"
 #include "ERF_Utils.H"
+#include <AMReX_buildInfo.H>
 #include "Diagnostics/ERF_SeaLevelPressure.H"
 
 using namespace amrex;
@@ -152,6 +156,48 @@ ERF::setPlotVariables2D (const std::string& pp_plot_var_names, Vector<std::strin
 }
 
 //
+// The conservative surface heat and moisture fluxes (z faces; the surface is the
+// domain's lowest k) applied to level lev: the SFS fluxes, or native SHOC's
+// snapshots of them where SHOC consumed and cleared those. nullptr where a field
+// does not exist (the moisture flux without a moisture model, both without
+// diffusion or a closure).
+//
+// Native SHOC state_update clears the host SFS arrays after consuming them. Use
+// SHOC's preserved snapshots only for flux components whose corresponding host
+// SFS field existed; otherwise keep the source null so the 2D writer emits the
+// documented -999 missing value.
+//
+// The sensible_heat_flux/latent_heat_flux outputs and the two-stream surface
+// energy balance (TwoStreamRadiation::advance) both take their fluxes from here,
+// so the balance removes from the ground exactly what the outputs report.
+//
+void
+ERF::surface_flux_sources (int lev,
+                           const MultiFab*& sens_flux,
+                           const MultiFab*& laten_flux) const
+{
+    sens_flux = SFS_hfx3_lev[lev].get();
+    laten_flux = SFS_q1fx3_lev[lev].get();
+    const ShocDriver* native_shoc = native_shoc_driver[lev].get();
+    const bool native_shoc_owns_scalar_fluxes =
+        native_shoc && native_shoc->owns_scalar_surface_fluxes();
+    const bool native_shoc_has_consumed_flux_diagnostics =
+        native_shoc && native_shoc->has_consumed_surface_flux_diagnostics();
+    if (plotfile2d::use_native_shoc_consumed_flux_source(
+            native_shoc_owns_scalar_fluxes,
+            native_shoc_has_consumed_flux_diagnostics,
+            SFS_hfx3_lev[lev] != nullptr)) {
+        sens_flux = &native_shoc->consumed_sens_flux_diagnostics();
+    }
+    if (plotfile2d::use_native_shoc_consumed_flux_source(
+            native_shoc_owns_scalar_fluxes,
+            native_shoc_has_consumed_flux_diagnostics,
+            SFS_q1fx3_lev[lev] != nullptr)) {
+        laten_flux = &native_shoc->consumed_laten_flux_diagnostics();
+    }
+}
+
+//
 // Fill one level of a destination MultiFab with the named 2D diagnostics, in
 // the order given by output_descriptors.  mf_dst must be laid out on
 // ba2d[lev]/dmap[lev] and have ncomp_mf components.
@@ -185,35 +231,16 @@ ERF::FillPlot2DVars (int lev,
     int khi = geom[lev].Domain().bigEnd(2);
 
     const MultiFab* pblh_source = nullptr;
-    const MultiFab* sens_flux_source = SFS_hfx3_lev[lev].get();
-    const MultiFab* laten_flux_source = SFS_q1fx3_lev[lev].get();
+    const MultiFab* sens_flux_source = nullptr;
+    const MultiFab* laten_flux_source = nullptr;
+    surface_flux_sources(lev, sens_flux_source, laten_flux_source);
     const MultiFab* shoc_ustar_source = nullptr;
     const MultiFab* shoc_olen_source = nullptr;
     const MultiFab* shoc_wthv_source = nullptr;
     const ShocDriver* native_shoc = native_shoc_driver[lev].get();
     SurfaceLayer* surf_layer = m_SurfaceLayer[Orientation(Direction::z,Orientation::low)].get();
-    const bool native_shoc_owns_scalar_fluxes =
-        native_shoc && native_shoc->owns_scalar_surface_fluxes();
-    const bool native_shoc_has_consumed_flux_diagnostics =
-        native_shoc && native_shoc->has_consumed_surface_flux_diagnostics();
     if (native_shoc && native_shoc->has_native_diagnostics()) {
         pblh_source = &native_shoc->pblh_diagnostics();
-    }
-    // Native SHOC state_update clears the host SFS arrays after consuming
-    // them. Use SHOC's preserved snapshots only for flux components whose
-    // corresponding host SFS field existed; otherwise keep the source null
-    // so the 2D writer emits the documented -999 missing value.
-    if (plotfile2d::use_native_shoc_consumed_flux_source(
-            native_shoc_owns_scalar_fluxes,
-            native_shoc_has_consumed_flux_diagnostics,
-            SFS_hfx3_lev[lev] != nullptr)) {
-        sens_flux_source = &native_shoc->consumed_sens_flux_diagnostics();
-    }
-    if (plotfile2d::use_native_shoc_consumed_flux_source(
-            native_shoc_owns_scalar_fluxes,
-            native_shoc_has_consumed_flux_diagnostics,
-            SFS_q1fx3_lev[lev] != nullptr)) {
-        laten_flux_source = &native_shoc->consumed_laten_flux_diagnostics();
     }
     if (native_shoc && native_shoc->has_native_diagnostics()) {
         shoc_ustar_source = &native_shoc->shoc_ustar_diagnostics();
@@ -390,6 +417,42 @@ ERF::FillPlot2DVars (int lev,
         mf_comp++;
     } // z0
 
+    // 10 m winds from the surface-layer momentum profile, in the direction of the
+    //    first-cell wind; -999 without a surface layer
+    {
+        const bool want_u10  = containerHasElement(plot_var_names, "u_10m");
+        const bool want_v10  = containerHasElement(plot_var_names, "v_10m");
+        const bool want_ue10 = containerHasElement(plot_var_names, "u_east_10m");
+        const bool want_vn10 = containerHasElement(plot_var_names, "v_north_10m");
+        const int u10_comp  = want_u10  ? mf_comp++ : -1;
+        const int v10_comp  = want_v10  ? mf_comp++ : -1;
+        const int ue10_comp = want_ue10 ? mf_comp++ : -1;
+        const int vn10_comp = want_vn10 ? mf_comp++ : -1;
+        if (want_u10 || want_v10 || want_ue10 || want_vn10) {
+            near_surface_diagnostics::WindSources wind10;
+            wind10.u_star           = surf_layer ? surf_layer->get_u_star(lev) : nullptr;
+            wind10.roughness_height = surf_layer ? surf_layer->get_z0(lev)     : nullptr;
+            wind10.obukhov_length   = surf_layer ? surf_layer->get_olen(lev)   : nullptr;
+            wind10.xvel = &vars_new[lev][Vars::xvel];
+            wind10.yvel = &vars_new[lev][Vars::yvel];
+            wind10.klo  = klo;
+            // The grid orientation for the earth-relative components, as for the
+            //    sampled u_east and v_north; without lat/lon the grid is aligned with east
+            MultiFab cos_alpha_10m, sin_alpha_10m;
+            const bool latlon = (lev < static_cast<int>(lat_m.size())) &&
+                                lat_m[lev] != nullptr && lon_m[lev] != nullptr;
+            if ((want_ue10 || want_vn10) && latlon) {
+                cos_alpha_10m.define(ba2d[lev], dmap[lev], 1, 0);
+                sin_alpha_10m.define(ba2d[lev], dmap[lev], 1, 0);
+                fill_grid_rotation(cos_alpha_10m, sin_alpha_10m, *lat_m[lev], *lon_m[lev], geom[lev]);
+                wind10.cos_alpha = &cos_alpha_10m;
+                wind10.sin_alpha = &sin_alpha_10m;
+            }
+            near_surface_diagnostics::fill_wind_10m(mf_dst, u10_comp, v10_comp,
+                                                    ue10_comp, vn10_comp, wind10);
+        }
+    } // u_10m, v_10m, u_east_10m, v_north_10m
+
     if (containerHasElement(plot_var_names, "OLR")) {
         // Outgoing longwave: the upward LW at the top-of-atmosphere
         // interface, which rad_fluxes keeps in the z-ghost cell above the
@@ -422,6 +485,27 @@ ERF::FillPlot2DVars (int lev,
         mf_comp++;
     } // seb_q_sfc
 
+    // The turbulent fluxes the surface energy balance used at its last update:
+    // with erf.radiation.seb_turbulent_flux_source = surface_layer these are the
+    // sensible_heat_flux and latent_heat_flux below, cell for cell.
+    if (containerHasElement(plot_var_names, "seb_hfx")) {
+        plotfile2d::fill_component_from_klevel_or_value(
+            mf_dst, mf_comp,
+            (solverChoice.rad_type == RadiationType::TwoStream) ? two_stream_rad.seb_hfx(lev)
+                                                                : nullptr,
+            0, -999);
+        mf_comp++;
+    } // seb_hfx
+
+    if (containerHasElement(plot_var_names, "seb_lh")) {
+        plotfile2d::fill_component_from_klevel_or_value(
+            mf_dst, mf_comp,
+            (solverChoice.rad_type == RadiationType::TwoStream) ? two_stream_rad.seb_lh(lev)
+                                                                : nullptr,
+            0, -999);
+        mf_comp++;
+    } // seb_lh
+
     if (containerHasElement(plot_var_names, "sens_flux")) {
         plotfile2d::fill_component_from_klevel_or_value(
             mf_dst, mf_comp, sens_flux_source, klo, -999);
@@ -437,7 +521,11 @@ ERF::FillPlot2DVars (int lev,
     } // laten_flux
 
     if (containerHasElement(plot_var_names, "surf_pres")) {
+        // The pressure at the ground, as WRF's PSFC: the lowest cell's pressure plus
+        //    rho g times the height of that cell's centre above the ground, the same
+        //    surface pressure the radiation and surface layer use
         bool moist = (solverChoice.moisture_type != MoistureType::None);
+        const Real dz = geom[lev].CellSize(2);
 #ifdef _OPENMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
 #endif
@@ -446,11 +534,15 @@ ERF::FillPlot2DVars (int lev,
             const Box& bx = mfi.tilebox();
             const auto& derdat   = mf_dst.array(mfi);
             const auto& cons_arr = vars_new[lev][Vars::cons].const_array(mfi);
+            const auto& z_arr    = (z_phys_nd[lev]) ? z_phys_nd[lev]->const_array(mfi)
+                                                    : Array4<const Real>{};
             ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                auto rt = cons_arr(i,j,klo,RhoTheta_comp);
-                auto qv = (moist) ? cons_arr(i,j,klo,RhoQ1_comp)/cons_arr(i,j,klo,Rho_comp)
-                                  : zero;
-                derdat(i, j, k, mf_comp) = getPgivenRTh(rt, qv);
+                const Real rho = cons_arr(i,j,klo,Rho_comp);
+                const Real qv  = (moist) ? cons_arr(i,j,klo,RhoQ1_comp)/rho : zero;
+                const Real z_cc_agl = (z_arr) ? Compute_Zrel_AtCellCenter(i,j,klo,z_arr)
+                                              : myhalf*dz;
+                derdat(i, j, k, mf_comp) = erf_surface_temperature::pressure_at_surface(
+                    rho, cons_arr(i,j,klo,RhoTheta_comp), qv, z_cc_agl);
             });
         }
         mf_comp++;
@@ -637,6 +729,24 @@ ERF::FillPlot2DVars (int lev,
     //    the pressure vertical coordinate.  This matches the 3-D plotfile path.
     MultiFab p_hse(base_state[lev], make_alias, BaseState::p0_comp, 1);
     const MultiFab* p_hse_ptr = (solverChoice.anelastic[lev] == 1) ? &p_hse : nullptr;
+    // The grid orientation, for the earth-relative u_east, v_north and wind_dir:
+    //    from this level's lat/lon when the run has them (a WRF or metgrid
+    //    initialization), otherwise the grid is taken to be aligned with east
+    const bool have_latlon = (lev < static_cast<int>(lat_m.size())) &&
+                             lat_m[lev] != nullptr && lon_m[lev] != nullptr;
+    // Every level is given lat/lon when level 0 has them (interpolated from the
+    //    coarser level, or read from the checkpoint). A level without them would
+    //    write grid-relative winds beside earth-relative ones in one plotfile.
+    const bool any_sampled = static_output_count < static_cast<int>(output_descriptors.size());
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!any_sampled || have_latlon || lat_m.empty() || lat_m[0] == nullptr,
+        "2D plotfile: level 0 has latitude/longitude arrays but this level does not, so its "
+        "sampled u_east, v_north and wind_dir could not be rotated to earth-relative");
+    MultiFab cos_alpha, sin_alpha;
+    if (have_latlon && any_sampled) {
+        cos_alpha.define(ba2d[lev], dmap[lev], 1, 0);
+        sin_alpha.define(ba2d[lev], dmap[lev], 1, 0);
+        fill_grid_rotation(cos_alpha, sin_alpha, *lat_m[lev], *lon_m[lev], geom[lev]);
+    }
     for (int out_idx = static_output_count; out_idx < static_cast<int>(output_descriptors.size()); ++out_idx) {
         const auto& descriptor = output_descriptors[out_idx];
         // Sampled-level descriptors are dynamic. The interpolator owns
@@ -646,6 +756,10 @@ ERF::FillPlot2DVars (int lev,
         wind_sources.xvel = &vars_new[lev][Vars::xvel];
         wind_sources.yvel = &vars_new[lev][Vars::yvel];
         wind_sources.zvel = &vars_new[lev][Vars::zvel];
+        if (have_latlon) {
+            wind_sources.cos_alpha = &cos_alpha;
+            wind_sources.sin_alpha = &sin_alpha;
+        }
         plotfile2d::fill_sampled_level_component(
             mf_dst, mf_comp, descriptor,
             vars_new[lev][Vars::cons],
@@ -667,6 +781,10 @@ ERF::FillPlot2DVars (int lev,
 void
 ERF::Write2DPlotFile (int which, PlotFileType plotfile_type, Vector<std::string> plot_var_names)
 {
+    // Station rows are buffered, and a run that aborts never reaches the next
+    // flush: flushing here keeps the station series as far along as the plotfiles.
+    flush_stations();
+
     const int plot_step = istep[0];
     const std::string plotfilename = make_2d_plotfile_name(which, plot_step,
                                                            plot2d_file_1, plot2d_file_2,
@@ -720,10 +838,12 @@ ERF::Write2DPlotFile (int which, PlotFileType plotfile_type, Vector<std::string>
          const Real* p_lo = my_geom[lev].ProbLo();
          const Real* p_hi = my_geom[lev].ProbHi();
          const auto dx    = my_geom[lev].CellSize();
+         const NCProvenance nc_provenance{buildInfoGetGitHash(1), buildInfoGetGitHash(2), NoahMPGitHash()};
          writeNCPlotFile(lev, l_which, plotfilename, GetVecOfConstPtrs(mf), varnames, istep,
                          {p_lo[0],p_lo[1],p_lo[2]},{p_hi[0],p_hi[1],dx[2]}, {dx[0],dx[1],dx[2]},
                          my_geom[lev].Domain(), static_cast<Real>(t_new[0]),
-                         static_cast<Real>(start_bdy_time), solverChoice, zlevels_stag[lev]);
+                         static_cast<Real>(start_bdy_time), solverChoice, zlevels_stag[lev],
+                         nc_provenance);
 #endif
     } else {
         // Here we assume the plotfile_type is PlotFileType::None

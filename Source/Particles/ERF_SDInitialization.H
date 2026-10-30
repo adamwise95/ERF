@@ -144,7 +144,7 @@ struct SDDistributionParams {
  *  \return Approximate inverse error function value
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real SD_erfinv_gpu(const amrex::Real x) {
+amrex::Real SD_erfinv_gpu (const amrex::Real x) {
     amrex::Real a = amrex::Real(0.147);
     amrex::Real eps = std::numeric_limits<amrex::Real>::epsilon();
     amrex::Real term = std::log(amrex::Real(1) - x * x + eps);
@@ -161,7 +161,7 @@ amrex::Real SD_erfinv_gpu(const amrex::Real x) {
  *  \return Generated mass value
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real SD_sample_mass_gpu(const SDDistributionParams& params,
+amrex::Real SD_sample_mass_gpu (const SDDistributionParams& params,
                                 const amrex::RandomEngine& engine,
                                 amrex::Real& mult_contribution)
 {
@@ -177,10 +177,11 @@ amrex::Real SD_sample_mass_gpu(const SDDistributionParams& params,
 
         case SDDistributionType::mass_exponential: {
             if (params.sampled_mult) {
-                // Sampled multiplicity: sample uniformly in log-space, weight by exponential PDF
+                // Sampled multiplicity: sample uniformly in log-space, weight by the exponential PDF in ln(m)
                 amrex::Real lnval = params.lnmin + u * params.lnrng;
                 mass = std::exp(lnval);
-                mult_contribution = (params.numdens * params.cell_volume) * std::exp(-mass / params.delta);
+                mult_contribution = (params.numdens * params.cell_volume) * (mass / params.delta)
+                                  * std::exp(-(mass - params.mass_min) / params.delta);
             } else {
                 // Constant multiplicity: true exponential distribution via inverse transform
                 // If U ~ Uniform(0,1), then -delta*ln(U) ~ Exponential(1/delta)
@@ -222,7 +223,7 @@ class SDInitProperties
 {
     public:
 
-        virtual ~SDInitProperties() = default;
+        virtual ~SDInitProperties () = default;
 
         using MatVec = std::vector<std::unique_ptr<MaterialProperties>>;
 
@@ -337,7 +338,7 @@ class SDInitProperties
          * \param[in] a_radius_gstd Geometric standard deviation for radius
          * \param[in,out] a_rng Random number generator
          */
-        void getDistribution( amrex::Vector<amrex::Real>& a_mass,
+        void getDistribution ( amrex::Vector<amrex::Real>& a_mass,
                               int a_np,
                               amrex::Real a_density,
                               SDDistributionType a_init_type,
@@ -366,7 +367,7 @@ class SDInitProperties
          * \param[in] a_radius_gstd Geometric standard deviation for radius
          * \param[in,out] a_rng Random number generator
          */
-        void getDistribution( amrex::Vector<amrex::Real>& a_mass,
+        void getDistribution ( amrex::Vector<amrex::Real>& a_mass,
                               amrex::Vector<amrex::Real>& a_mult,
                               amrex::Real a_dV,
                               int a_np,
@@ -508,7 +509,7 @@ class SDInitProperties
          * \param[in] a_sampled_mult Whether using sampled multiplicity mode
          * \return SDDistributionParams structure for GPU use
          */
-        [[nodiscard]] SDDistributionParams getSpeciesDistParams(
+        [[nodiscard]] SDDistributionParams getSpeciesDistParams (
             int a_idx,
             amrex::Real a_density,
             amrex::Real a_cell_volume,
@@ -535,7 +536,7 @@ class SDInitProperties
          * \param[in] a_sampled_mult Whether using sampled multiplicity mode
          * \return SDDistributionParams structure for GPU use
          */
-        [[nodiscard]] SDDistributionParams getAerosolDistParams(
+        [[nodiscard]] SDDistributionParams getAerosolDistParams (
             int a_idx,
             amrex::Real a_density,
             amrex::Real a_cell_volume,
@@ -569,7 +570,7 @@ class SDInitProperties
          * \param[in] a_sampled_mult Whether using sampled multiplicity mode
          * \return SDDistributionParams structure
          */
-        [[nodiscard]] SDDistributionParams makeDistributionParams(
+        [[nodiscard]] SDDistributionParams makeDistributionParams (
             SDDistributionType a_init_type,
             amrex::Real a_mass_min,
             amrex::Real a_mass_max,
@@ -585,7 +586,7 @@ class SDInitProperties
         /*! \brief Determine whether multiplicity is sampled or constant
          * \return True if multiplicity is sampled, false if constant
          */
-        [[nodiscard]] inline bool sampledMultiplicity() const
+        [[nodiscard]] inline bool sampledMultiplicity () const
         {
             return (m_mult_type == SDMultiplicityType::sampled);
         }
@@ -597,7 +598,7 @@ class SDInitProperties
          *
          * \return Volume of the particle domain in cubic meters
          */
-        [[nodiscard]] inline amrex::Real volume() const
+        [[nodiscard]] inline amrex::Real volume () const
         {
             amrex::Real vol = zero;
             if (m_type == SDInitShape::uniform) {
@@ -628,7 +629,7 @@ class SDInjection : public SDInitProperties
 {
     public:
 
-        virtual ~SDInjection() = default;
+        virtual ~SDInjection () = default;
 
         /*!< Injection rate (number of physical particles per meter^3 second) */
         amrex::Real m_inj_rate = 0;
@@ -844,7 +845,7 @@ class SDInitialization : public SDInitProperties
 {
     public:
 
-        virtual ~SDInitialization() = default;
+        virtual ~SDInitialization () = default;
 
         /*!< Initial number density of super-droplets */
         amrex::Real m_numdens_sd_init = -1;

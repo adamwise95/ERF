@@ -28,7 +28,7 @@ canonicalize_metgrid_missing_values (const std::string& fname,
         auto ncf = ncutils::NCFile::open(fname, NC_NOWRITE);
         if (ncf.has_var(variable_name)) {
             const auto variable = ncf.var(variable_name);
-            for (const std::string& attr_name : {"_FillValue", "missing_value"}) {
+            for (const char* attr_name : {"_FillValue", "missing_value"}) {
                 if (!variable.has_attr(attr_name)) { continue; }
                 std::vector<double> values;
                 variable.get_attr(attr_name, values);
@@ -82,7 +82,7 @@ canonicalize_metgrid_missing_values (const std::string& fname,
 } // namespace
 
 Box
-read_subdomain_from_metgrid(int /*lev*/, const std::string& fname, int& ratio, int& klo, int& khi)
+read_subdomain_from_metgrid (int /*lev*/, const std::string& fname, int& ratio, int& klo, int& khi)
 {
     int is, js;
     int nx, ny, nz;
@@ -196,6 +196,12 @@ read_from_metgrid (int lev, int /*itime*/,
     ParallelDescriptor::Bcast(&NC_epochTime, 1, ioproc);
     ParallelDescriptor::Bcast(&NC_dx,        1, ioproc);
     ParallelDescriptor::Bcast(&NC_dy,        1, ioproc);
+
+    // The date string, so that every rank has the same value
+    int date_len = ParallelDescriptor::IOProcessor() ? static_cast<int>(NC_dateTime.size()) : 0;
+    ParallelDescriptor::Bcast(&date_len, 1, ioproc);
+    NC_dateTime.resize(date_len);
+    if (date_len > 0) { ParallelDescriptor::Bcast(NC_dateTime.data(), date_len, ioproc); }
 
     Print() << "Loading initial data from NetCDF file at level " << lev << std::endl;
 

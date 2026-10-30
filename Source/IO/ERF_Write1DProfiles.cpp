@@ -80,7 +80,7 @@ ERF::write_1D_profiles (double time)
                       if (zlevels_stag[0].size() > 1) {
                           z = myhalf * (zlevels_stag[0][k] + zlevels_stag[0][k+1]);
                       } else {
-                          z = (k + myhalf)* dx[2];
+                          z = geom[0].ProbLo(2) + (k + myhalf)* dx[2];
                       }
                       data_log1 << std::setw(datwidth) << std::setprecision(timeprecision) << time << " "
                                 << std::setw(datwidth) << std::setprecision(datprecision) << z << " "
@@ -103,7 +103,7 @@ ERF::write_1D_profiles (double time)
                       if (zlevels_stag[0].size() > 1) {
                           z = myhalf * (zlevels_stag[0][k] + zlevels_stag[0][k+1]);
                       } else {
-                          z = (k + myhalf)* dx[2];
+                          z = geom[0].ProbLo(2) + (k + myhalf)* dx[2];
                       }
                       Real thv = h_avg_th[k] * (one + epsv*h_avg_qv[k] - h_avg_qc[k] - h_avg_qr[k]);
                       data_log2 << std::setw(datwidth) << std::setprecision(timeprecision) << time << " "
@@ -158,7 +158,7 @@ ERF::write_1D_profiles (double time)
                       if (zlevels_stag[0].size() > 1) {
                           z = myhalf * (zlevels_stag[0][k] + zlevels_stag[0][k+1]);
                       } else {
-                          z = (k + myhalf)* dx[2];
+                          z = geom[0].ProbLo(2) + (k + myhalf)* dx[2];
                       }
                       data_log3 << std::setw(datwidth) << std::setprecision(timeprecision) << time << " "
                                 << std::setw(datwidth) << std::setprecision(datprecision) << z << " "
@@ -180,7 +180,7 @@ ERF::write_1D_profiles (double time)
                         if (zlevels_stag[0].size() > 1) {
                             z = myhalf * (zlevels_stag[0][k] + zlevels_stag[0][k+1]);
                         } else {
-                            z = (k + myhalf)* dx[2];
+                            z = geom[0].ProbLo(2) + (k + myhalf)* dx[2];
                         }
                         data_log4 << std::setw(datwidth) << std::setprecision(timeprecision) << time << " "
                                   << std::setw(datwidth) << std::setprecision(datprecision) << z << " "
@@ -238,21 +238,21 @@ ERF::write_1D_profiles (double time)
  * @param h_avg_wthv Profile for vertical velocity * virtual potential temperature on Host
  */
 void
-ERF::derive_diag_profiles(double /*time*/,
-                          Gpu::HostVector<Real>& h_avg_u   , Gpu::HostVector<Real>& h_avg_v  , Gpu::HostVector<Real>& h_avg_w,
-                          Gpu::HostVector<Real>& h_avg_rho , Gpu::HostVector<Real>& h_avg_th , Gpu::HostVector<Real>& h_avg_ksgs,
-                          Gpu::HostVector<Real>& h_avg_Kmv , Gpu::HostVector<Real>& h_avg_Khv,
-                          Gpu::HostVector<Real>& h_avg_qv  , Gpu::HostVector<Real>& h_avg_qc , Gpu::HostVector<Real>& h_avg_qr,
-                          Gpu::HostVector<Real>& h_avg_wqv , Gpu::HostVector<Real>& h_avg_wqc, Gpu::HostVector<Real>& h_avg_wqr,
-                          Gpu::HostVector<Real>& h_avg_qi  , Gpu::HostVector<Real>& h_avg_qs , Gpu::HostVector<Real>& h_avg_qg,
-                          Gpu::HostVector<Real>& h_avg_uu  , Gpu::HostVector<Real>& h_avg_uv , Gpu::HostVector<Real>& h_avg_uw,
-                          Gpu::HostVector<Real>& h_avg_vv  , Gpu::HostVector<Real>& h_avg_vw , Gpu::HostVector<Real>& h_avg_ww,
-                          Gpu::HostVector<Real>& h_avg_uth , Gpu::HostVector<Real>& h_avg_vth, Gpu::HostVector<Real>& h_avg_wth,
-                          Gpu::HostVector<Real>& h_avg_thth,
-                          Gpu::HostVector<Real>& h_avg_uiuiu, Gpu::HostVector<Real>& h_avg_uiuiv, Gpu::HostVector<Real>& h_avg_uiuiw,
-                          Gpu::HostVector<Real>& h_avg_p,
-                          Gpu::HostVector<Real>& h_avg_pu  , Gpu::HostVector<Real>& h_avg_pv , Gpu::HostVector<Real>& h_avg_pw,
-                          Gpu::HostVector<Real>& h_avg_wthv)
+ERF::derive_diag_profiles (double /*time*/,
+                           Gpu::HostVector<Real>& h_avg_u   , Gpu::HostVector<Real>& h_avg_v  , Gpu::HostVector<Real>& h_avg_w,
+                           Gpu::HostVector<Real>& h_avg_rho , Gpu::HostVector<Real>& h_avg_th , Gpu::HostVector<Real>& h_avg_ksgs,
+                           Gpu::HostVector<Real>& h_avg_Kmv , Gpu::HostVector<Real>& h_avg_Khv,
+                           Gpu::HostVector<Real>& h_avg_qv  , Gpu::HostVector<Real>& h_avg_qc , Gpu::HostVector<Real>& h_avg_qr,
+                           Gpu::HostVector<Real>& h_avg_wqv , Gpu::HostVector<Real>& h_avg_wqc, Gpu::HostVector<Real>& h_avg_wqr,
+                           Gpu::HostVector<Real>& h_avg_qi  , Gpu::HostVector<Real>& h_avg_qs , Gpu::HostVector<Real>& h_avg_qg,
+                           Gpu::HostVector<Real>& h_avg_uu  , Gpu::HostVector<Real>& h_avg_uv , Gpu::HostVector<Real>& h_avg_uw,
+                           Gpu::HostVector<Real>& h_avg_vv  , Gpu::HostVector<Real>& h_avg_vw , Gpu::HostVector<Real>& h_avg_ww,
+                           Gpu::HostVector<Real>& h_avg_uth , Gpu::HostVector<Real>& h_avg_vth, Gpu::HostVector<Real>& h_avg_wth,
+                           Gpu::HostVector<Real>& h_avg_thth,
+                           Gpu::HostVector<Real>& h_avg_uiuiu, Gpu::HostVector<Real>& h_avg_uiuiv, Gpu::HostVector<Real>& h_avg_uiuiw,
+                           Gpu::HostVector<Real>& h_avg_p,
+                           Gpu::HostVector<Real>& h_avg_pu  , Gpu::HostVector<Real>& h_avg_pv , Gpu::HostVector<Real>& h_avg_pw,
+                           Gpu::HostVector<Real>& h_avg_wthv)
 {
     // We assume that this is always called at level 0
     int lev = 0;
@@ -639,8 +639,8 @@ ERF::derive_stress_profiles (Gpu::HostVector<Real>& h_avg_tau11, Gpu::HostVector
 }
 
 void
-ERF::WriteLinePlot(const std::string& filename,
-                   Vector<std::array<Real, 2>>& points_xy)
+ERF::WriteLinePlot (const std::string& filename,
+                    Vector<std::array<Real, 2>>& points_xy)
 {
     std::ofstream ofs(filename);
     if (!ofs.is_open()) {
