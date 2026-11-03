@@ -138,6 +138,9 @@ Parameter tables and external forcing
 +----------------------------------+----------------------------------------------------------+----------------------+------------------+
 | **slm.veg_dataset**              | vegetation dataset within the parameter file             | ``usgs``, ``modis``  | ``modis``        |
 +----------------------------------+----------------------------------------------------------+----------------------+------------------+
+| **slm.landuse_dataset**          | WRFInput land-use scheme; ``auto`` reads ``MMINLU``      | ``auto``, ``modis``, | ``auto``         |
+|                                  | and selects NLCD40 when appropriate                      | ``nlcd40``           |                  |
++----------------------------------+----------------------------------------------------------+----------------------+------------------+
 | **slm.soil_dataset**             | soil dataset within the parameter file                   | ``stas``,            | ``stas``         |
 |                                  |                                                          | ``stas_ruc``         |                  |
 +----------------------------------+----------------------------------------------------------+----------------------+------------------+
@@ -175,6 +178,30 @@ the variables ``SWVIS``, ``SWNIR``, ``SWVISD``, ``SWNIRD``, ``COSZRS``, and
 
 WRFInput initialization
 ------------------------
+
+For a WRFInput file with ``MMINLU = NLCD40``, SLM keeps the original 1–40
+``IVGTYP`` category in ``vegtype``. Set ``slm.landuse_dataset = nlcd40`` if
+the file lacks that attribute. Categories 18–20 are WRF's undefined/fill
+classes and cause an input error. Categories 17 and 21 are water.
+
+SLM uses the NLCD40 entries from WRF v4.7.1 ``VEGPARM.TBL`` for canopy
+height, root count, stomatal and radiation resistance, LAI bounds, and
+``Z0MIN``/``Z0MAX``. NLCD albedo and emissivity values supply the ground
+radiation properties. The roughness length follows Noah's interpolation with
+``VEGFRA``, ``SHDMIN``, and ``SHDMAX``. This retains the four developed-class
+roughness lengths of 0.5, 0.7, 1.5, and 2.0 m and the forest-class values.
+The generic urban and developed classes retain their WRF vegetation fraction
+and use the NLCD40
+``SHDFAC`` value to set the impervious fraction; SLM assigns a short canopy
+height to their vegetated portion because the Noah table lists zero height.
+SLM still applies its wind-speed adjustment to that base roughness during
+momentum transfer. Radiation optics use a related MODIS class because the Noah
+NLCD40 table does not supply the leaf optical coefficients required by SLM's
+two-stream radiation scheme. This internal class does not replace ``vegtype``.
+Where WRF lists zero canopy height for a vegetated class, SLM keeps the
+internal class's positive height for its canopy calculation.
+The built-in NLCD40 LAI values take precedence over ``slm.use_param_tbl`` and
+``slm.interpolate_lai``; those options cannot be enabled with NLCD40.
 
 With ``erf.init_type = WRFInput``, SLM reads the mapped land-surface fields
 from the WRF input data, including soil thickness and temperature/moisture,
@@ -276,7 +303,8 @@ The category constants and their WRFInput treatment are:
 | ``islake``           | 21                   | Water category with WRF land type 17.                    |
 +----------------------+----------------------+----------------------------------------------------------+
 
-The category-specific defaults applied by this branch are:
+The category-specific defaults below apply to the legacy MODIS path. NLCD40
+uses its original ``IVGTYP`` values and the category mapping described above.
 
 +----------------------+----------------------------------------------------------+
 | Category             | Values assigned by SLM                                   |

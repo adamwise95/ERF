@@ -1,5 +1,6 @@
 #include <ERF_SLM.H>
 #include "ERF_SLM_DefaultParams.H"
+#include "ERF_SLM_NLCD40.H"
 #include "ERF_EOS.H"
 #include "ERF_TileNoZ.H"
 #include "ERF_PlanarBoundary.H"
@@ -107,6 +108,14 @@ SLM::Init (const int& /*lev*/,
                !nc_init_file.empty() && !nc_init_file[0].empty()) {
         data_dz = read_wrfinput_soil_dz(nc_init_file[0][0]);
         data_source = "DZS in " + nc_init_file[0][0];
+        int nlcd40 = 0;
+        if (ParallelDescriptor::IOProcessor() && FileSystem::Exists(nc_init_file[0][0])) {
+            auto ncf = ncutils::NCFile::open(nc_init_file[0][0], NC_NOWRITE);
+            if (ncf.has_attr("MMINLU") && ncf.get_attr("MMINLU") == "NLCD40") { nlcd40 = 1; }
+            ncf.close();
+        }
+        ParallelDescriptor::Bcast(&nlcd40, 1, ParallelDescriptor::IOProcessorNumber());
+        wrfinput_nlcd40 = nlcd40 != 0;
     }
 #else
     amrex::ignore_unused(nc_init_file);
@@ -502,6 +511,28 @@ SLM::Init (const int& /*lev*/,
                        Lsm_Data_Ptr(Lsm_DataIndex("alb_vis_sfc_diff")),
                        Lsm_Data_Ptr(Lsm_DataIndex("alb_nir_sfc_diff"))};
 }
+/** Copy the embedded WRF NLCD40 table to storage usable by CPU and GPU kernels. */
+void SLM::init_nlcd40_table ()
+{
+    nlcd40_table = TableData<Real, 2>({0, 0}, {40, SLMNLCD40::NumColumns});
+#ifdef AMREX_USE_GPU
+    TableData<Real, 2> host_table({0, 0}, {40, SLMNLCD40::NumColumns}, amrex::The_Pinned_Arena());
+    auto const& table = host_table.table();
+#else
+    auto const& table = nlcd40_table.table();
+#endif
+    for (int category = 0; category < 40; ++category) {
+        for (int column = 0; column < SLMNLCD40::NumColumns; ++column) {
+            table(category, column) = SLMNLCD40::values[category][column];
+        }
+    }
+#ifdef AMREX_USE_GPU
+    nlcd40_table.copy(host_table);
+    Gpu::streamSynchronize();
+#endif
+    amrex::Print() << " SLM: Using NLCD40 land-use parameters" << std::endl;
+}
+
 /**
  * Initialize SLM from inputs.
  *
@@ -515,6 +546,17 @@ SLM::Init (const int& /*lev*/,
 void SLM::init_from_inputs ()
 {
     ParmParse pp("slm");
+    pp.query("landuse_dataset", landuse_dataset);
+    landuse_dataset = amrex::toLower(landuse_dataset);
+    if (landuse_dataset != "auto" && landuse_dataset != "modis" && landuse_dataset != "nlcd40") {
+        amrex::Abort("SLM: slm.landuse_dataset must be auto, modis, or nlcd40");
+    }
+    use_nlcd40 = landuse_dataset == "nlcd40" ||
+                 (landuse_dataset == "auto" && wrfinput_nlcd40);
+    if (use_nlcd40 && m_init_type != InitType::WRFInput) {
+        amrex::Abort("SLM: NLCD40 land use currently requires WRFInput initialization");
+    }
+    if (use_nlcd40) { init_nlcd40_table(); }
     pp.query("landtype0", landtype0);
     pp.query("LAI0", LAI0);
 
@@ -600,6 +642,13 @@ void SLM::init_from_inputs ()
     pp.query("veg_dataset", veg_dataset);
     pp.query("soil_dataset", soil_dataset);
     pp.query("use_param_tbl", use_wrf_lai);
+
+    if (use_nlcd40 && (use_wrf_lai || interpolate_lai)) {
+        amrex::Abort("SLM: NLCD40 uses its built-in VEGPARM.TBL LAI values; disable slm.use_param_tbl and slm.interpolate_lai");
+    }
+    if (use_nlcd40 && use_param_file && amrex::toLower(veg_dataset) != "modis") {
+        amrex::Abort("SLM: NLCD40 radiation analogs require slm.veg_dataset = modis");
+    }
 
     if (use_param_file) {
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(use_wrf_lai != use_param_file, "Cannot use parameter file and parameter table, must choose one method");
@@ -984,6 +1033,18 @@ void SLM::slm_init ()
     // Sets model properties based on the landtype
     init_landtype();
 
+    if (use_nlcd40) {
+        const int d_khi_lsm = khi_lsm;
+        for (MFIter mfi(vegetype, TileNoZ()); mfi.isValid(); ++mfi) {
+            auto category = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
+            auto vegetation = vegetype.array(mfi);
+            ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+                const int c = static_cast<int>(category(i,j,d_khi_lsm));
+                if (c == 13 || (c >= 23 && c <= 26)) { vegetation(i,j,0) = 1; }
+            });
+        }
+    }
+
     // TODO: VEGYES and set minimum LAI
     vege_YES.setVal(one);
 
@@ -1053,6 +1114,7 @@ void SLM::slm_init ()
 
     // Update any parameters using the values from a parameter file
     init_from_params();
+    apply_nlcd40_params();
 }
 
 /**
@@ -1075,11 +1137,32 @@ void SLM::init_wrfinput_vars ()
     const auto& input_vegtype = *lsm_fab_vars[LsmVar_SLM::vegtype];
     const int input_vegtype_min = static_cast<int>(input_vegtype.min(0));
     const int input_vegtype_max = static_cast<int>(input_vegtype.max(0));
-    if (input_vegtype_min < 0 || input_vegtype_max > 21) {
-        amrex::Abort("SLM: WRF vegetation categories must be in the supported range [0, 21], "
+    const int max_vegtype = use_nlcd40 ? 40 : 21;
+    if (input_vegtype_min < 0 || input_vegtype_max > max_vegtype) {
+        amrex::Abort("SLM: WRF vegetation categories must be in the supported range [0, " +
+                     std::to_string(max_vegtype) + "], "
                      "where 0 denotes water/non-land! min = " +
                      std::to_string(input_vegtype_min) + ", max = " +
                      std::to_string(input_vegtype_max));
+    }
+
+    if (use_nlcd40) {
+        ReduceOps<ReduceOpMax> reduce_op;
+        ReduceData<int> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+        for (MFIter mfi(input_vegtype, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const auto categories = input_vegtype.const_array(mfi);
+            reduce_op.eval(mfi.validbox(), reduce_data,
+                           [=] AMREX_GPU_DEVICE(int i, int j, int k) -> ReduceTuple {
+                const Real value = categories(i,j,k);
+                if (!amrex::Math::isfinite(value)) { return 1; }
+                const int category = static_cast<int>(value);
+                return (value != category || !SLMNLCD40::valid_category(category)) ? 1 : 0;
+            });
+        }
+        int invalid = amrex::get<0>(reduce_data.value());
+        ParallelDescriptor::ReduceIntMax(invalid);
+        if (invalid) { amrex::Abort("SLM: NLCD40 IVGTYP contains an invalid or unclassified category"); }
     }
 
     for (MFIter mfi(landtype, TileNoZ()); mfi.isValid(); ++mfi) {
@@ -1109,11 +1192,13 @@ void SLM::init_wrfinput_vars ()
         auto vege_YES_arr = vege_YES.array(mfi);
 
         const bool d_use_wrf_lai = use_wrf_lai;
+        const bool d_use_nlcd40 = use_nlcd40;
         const Real d_urban_veg_frac = d_use_wrf_lai ? param_table[isnature - 1][1] : 0.0;
 
         ParallelFor(bx2d, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
-            landtype_arr(i, j, 0) = static_cast<int>(vegtype_arr(i, j, d_khi_lsm));
+            const int category = static_cast<int>(vegtype_arr(i, j, d_khi_lsm));
+            landtype_arr(i, j, 0) = category;
             lai_arr(i, j, 0) = in_lai_arr(i, j, d_khi_lsm);
 
             const amrex::Real tsk = in_tsk_arr(i, j, d_khi_lsm);
@@ -1151,6 +1236,9 @@ void SLM::init_wrfinput_vars ()
                 alb_vis_sfc_dif_arr(i, j, d_khi_lsm) = alb_vis_sfc_dif_arr(i, j, 0);
                 alb_nir_sfc_dif_arr(i, j, d_khi_lsm) = alb_nir_sfc_dif_arr(i, j, 0);
 
+            } else if (d_use_nlcd40 && category >= 22) {
+                // MODIS analogs are used only for SLM algorithms without NLCD optics.
+                landtype_arr(i, j, 0) = SLMNLCD40::analog(category);
             } else if (landtype_arr(i, j, 0) > 16) {
                 // amrex::Print() << "     -- urban cell (i = " << i << " j = " << j << ") - setting landtype=" << isnature << " (orig landtype = " << landtype_arr(i, j, 0) << ")" << std::endl;
                 // for urban cells, set as a nature landtype for the non-building part
@@ -1162,9 +1250,9 @@ void SLM::init_wrfinput_vars ()
                 //landtype_arr(i, j, 0) = isurban;
             }
 
-            // Keep the WRF vegetation class synchronized with the normalized SLM class.
-            vegtype_arr(i, j, d_khi_lsm) = landtype_arr(i, j, 0);
-            vegtype_arr(i, j, 0) = landtype_arr(i, j, 0);
+            // Preserve the original WRF category, including water and NLCD classes.
+            vegtype_arr(i, j, 0) = d_use_nlcd40 ? category : landtype_arr(i, j, 0);
+            if (!d_use_nlcd40) { vegtype_arr(i, j, d_khi_lsm) = landtype_arr(i, j, 0); }
         });
     }
 
@@ -1398,6 +1486,7 @@ SLM::initialize_processed_state (const bool preserve_checkpoint_fields)
 {
     const int d_khi_lsm = khi_lsm;
     const int islake = 21;
+    const bool d_use_nlcd40 = use_nlcd40;
 
     MultiFab saved_tsurf = lsm_fab_vars[LsmVar_SLM::tsurf]->deepCopy();
     MultiFab saved_soilt = lsm_fab_vars[LsmVar_SLM::soilt]->deepCopy();
@@ -1434,7 +1523,9 @@ SLM::initialize_processed_state (const bool preserve_checkpoint_fields)
         ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int) noexcept {
             const int input_landtype = static_cast<int>(vegtype_arr(i, j, d_khi_lsm));
             const bool water = input_landtype <= 0 || input_landtype == 17 || input_landtype == islake;
-            const int normalized_landtype = (input_landtype > 16) ? 14 : input_landtype;
+            const int normalized_landtype = d_use_nlcd40 && input_landtype >= 22
+                ? SLMNLCD40::analog(input_landtype)
+                : (input_landtype > 16 ? 14 : input_landtype);
 
             landmask_arr(i, j, 0) = water ? 0 : 1;
             landtype_arr(i, j, 0) = water ? 0 : normalized_landtype;
@@ -2290,6 +2381,7 @@ void SLM::rebuild_restart_fields ()
 
     // Reapply table-derived parameters without resetting prognostic state.
     init_from_params();
+    apply_nlcd40_params();
 
     for (MFIter mfi(landtype, TileNoZ()); mfi.isValid(); ++mfi) {
         const Box box = mfi.tilebox();
@@ -2851,13 +2943,113 @@ void SLM::init_from_params ()
     }
 }
 
+/** Apply the Noah VEGPARM.TBL entries associated with the original WRF category. */
+void SLM::apply_nlcd40_params ()
+{
+    if (!use_nlcd40) { return; }
+
+    const int d_khi_lsm = khi_lsm;
+    const int max_roots = m_nz_lsm;
+    auto const& params = nlcd40_table.const_table();
+    for (MFIter mfi(landtype, TileNoZ()); mfi.isValid(); ++mfi) {
+        const Box box = mfi.tilebox();
+        auto category = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
+        auto land = landmask.const_array(mfi);
+        auto vegetation = vegetype.const_array(mfi);
+        auto roots = nroot.array(mfi);
+        auto rs = Rc_min.array(mfi);
+        auto rgl = Rgl.array(mfi);
+        auto hs = hs_rc.array(mfi);
+        auto canopy = ztop.array(mfi);
+        auto displacement = disp_hgt.array(mfi);
+        auto impervious = IMPERV.array(mfi);
+        auto ground_emissivity = IR_emis_grnd.array(mfi);
+        auto soil_emissivity = IR_emis_soil.const_array(mfi);
+        ParallelFor(box, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+            if (land(i,j,0) != 1) { return; }
+            const int c = static_cast<int>(category(i,j,d_khi_lsm)) - 1;
+            const bool urban = c == 12 || (c >= 22 && c <= 25);
+            const Real height = urban && vegetation(i,j,0) == 1
+                ? Real(0.5) : params(c, SLMNLCD40::Ztop);
+            if (height > 0 || vegetation(i,j,0) == 0) {
+                canopy(i,j,0) = height;
+                displacement(i,j,0) = 0.65 * height;
+            }
+            if (vegetation(i,j,0) == 1) {
+                roots(i,j,0) = amrex::min(max_roots, static_cast<int>(params(c, SLMNLCD40::Nroot)));
+                rs(i,j,0) = params(c, SLMNLCD40::Rs);
+                rgl(i,j,0) = params(c, SLMNLCD40::Rgl);
+                hs(i,j,0) = params(c, SLMNLCD40::Hs);
+            }
+            if (urban) {
+                impervious(i,j,0) = 1.0 - params(c, SLMNLCD40::Shdfac);
+                ground_emissivity(i,j,0) = IR_emis_urban * impervious(i,j,0) +
+                                            soil_emissivity(i,j,0) * (1.0 - impervious(i,j,0));
+            }
+        });
+        update_nlcd40_roughness(mfi);
+    }
+}
+
+/** Noah's Z0MIN/Z0MAX interpolation, using WRFInput SHDMIN/SHDMAX and VEGFRA. */
+void SLM::update_nlcd40_roughness (const MFIter& mfi)
+{
+    if (!use_nlcd40) { return; }
+    const int d_khi_lsm = khi_lsm;
+    auto const& params = nlcd40_table.const_table();
+    auto category = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
+    auto land = landmask.const_array(mfi);
+    auto fraction = lsm_fab_vars[LsmVar_SLM::veg_frac]->const_array(mfi);
+    auto minimum = lsm_fab_vars[LsmVar_SLM::veg_frac_min]->const_array(mfi);
+    auto maximum = lsm_fab_vars[LsmVar_SLM::veg_frac_max]->const_array(mfi);
+    auto roughness = z0_sfc.array(mfi);
+    ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+        if (land(i,j,0) != 1) { return; }
+        const int c = static_cast<int>(category(i,j,d_khi_lsm)) - 1;
+        const Real zmin = params(c, SLMNLCD40::Z0Min);
+        const Real zmax = params(c, SLMNLCD40::Z0Max);
+        const Real fmin = minimum(i,j,0);
+        const Real fmax = maximum(i,j,0);
+        const Real weight = SLMNLCD40::fraction_weight(fraction(i,j,0), fmin, fmax);
+        roughness(i,j,0) = zmin + weight * (zmax - zmin);
+    });
+}
+
 /**
  * Updates LAI and SAI based on the current simulation time and monthly values
  * from the LAI and SAI tables.
  */
 void SLM::UpdateLAI (const amrex::MFIter &mfi)
 {
-    if (interpolate_lai) {
+    if (use_nlcd40) {
+        const int d_khi_lsm = khi_lsm;
+        auto const& params = nlcd40_table.const_table();
+        auto category = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
+        auto land = landmask.const_array(mfi);
+        auto vegetation = vegetype.const_array(mfi);
+        auto fraction = lsm_fab_vars[LsmVar_SLM::veg_frac]->const_array(mfi);
+        auto minimum = lsm_fab_vars[LsmVar_SLM::veg_frac_min]->const_array(mfi);
+        auto maximum = lsm_fab_vars[LsmVar_SLM::veg_frac_max]->const_array(mfi);
+        auto lai = LAI.array(mfi);
+        auto sai = SAI.array(mfi);
+        ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+            if (land(i,j,0) != 1) { return; }
+            const int c = static_cast<int>(category(i,j,d_khi_lsm)) - 1;
+            if (vegetation(i,j,0) == 0) {
+                lai(i,j,0) = 0;
+                sai(i,j,0) = 0;
+                return;
+            }
+            const Real fmin = minimum(i,j,0);
+            const Real fmax = maximum(i,j,0);
+            const Real weight = SLMNLCD40::fraction_weight(fraction(i,j,0), fmin, fmax);
+            lai(i,j,0) = params(c, SLMNLCD40::LaiMin) +
+                          weight * (params(c, SLMNLCD40::LaiMax) - params(c, SLMNLCD40::LaiMin));
+            sai(i,j,0) = 0;
+        });
+        update_nlcd40_roughness(mfi);
+        UpdateLAIParameters(mfi);
+    } else if (interpolate_lai) {
         Box box = mfi.tilebox();
         box.makeSlab(2, 0);
 
@@ -5788,11 +5980,14 @@ void SLM::radiation_noahmp (const amrex::MFIter &mfi)
     const int d_khi_lsm = khi_lsm;
     const int d_opt_rad = opt_rad;
     const int d_opt_alb = opt_alb;
+    const bool d_use_nlcd40 = use_nlcd40;
+    auto const& nlcd_params = nlcd40_table.const_table();
 
     auto box = mfi.tilebox();
 
     auto landmask_arr = landmask.const_array(mfi);
-    auto vegtype_arr = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
+    auto landtype_arr = landtype.const_array(mfi);
+    auto category_arr = lsm_fab_vars[LsmVar_SLM::vegtype]->const_array(mfi);
     auto vegetype_arr = vegetype.const_array(mfi);
 
     // Input arrays
@@ -5810,6 +6005,8 @@ void SLM::radiation_noahmp (const amrex::MFIter &mfi)
     auto soilw_arr = lsm_fab_vars[LsmVar_SLM::soilw]->const_array(mfi);
     auto poro_soil_arr = lsm_fab_vars[LsmVar_SLM::poro_soil]->const_array(mfi);
     auto veg_frac_arr = lsm_fab_vars[LsmVar_SLM::veg_frac]->const_array(mfi);
+    auto veg_frac_min_arr = lsm_fab_vars[LsmVar_SLM::veg_frac_min]->const_array(mfi);
+    auto veg_frac_max_arr = lsm_fab_vars[LsmVar_SLM::veg_frac_max]->const_array(mfi);
 
     // Existing SLM vegetation structure parameters (used instead of reading from NoahmpTable.TBL)
     // NOTE: Khai_L is equivalent to NOAHMP's XL (leaf/stem orientation index)
@@ -5935,8 +6132,14 @@ void SLM::radiation_noahmp (const amrex::MFIter &mfi)
         amrex::Real tv = t_canop_arr(i, j, 0);
         amrex::Real tg = t_ground_skin_arr(i, j, 0);
         amrex::Real fveg = veg_frac_arr(i, j, d_khi_lsm);
-        int vegtyp = static_cast<int>(vegtype_arr(i, j, d_khi_lsm));
+        int vegtyp = landtype_arr(i, j, 0);
         int veg_idx = vegtyp - 1;  // convert to 0-based index
+        int nlcd_idx = d_use_nlcd40 ? static_cast<int>(category_arr(i,j,d_khi_lsm)) - 1 : 0;
+        const Real fmin = veg_frac_min_arr(i,j,0);
+        const Real fmax = veg_frac_max_arr(i,j,0);
+        const Real nlcd_weight = d_use_nlcd40
+            ? SLMNLCD40::fraction_weight(veg_frac_arr(i,j,0), fmin, fmax)
+            : Real(0);
 
         // Incoming solar radiation
         amrex::Real solad[2], solai[2];
@@ -6022,8 +6225,14 @@ void SLM::radiation_noahmp (const amrex::MFIter &mfi)
             alblak[0] = d_alblak[0];
             alblak[1] = d_alblak[1];
 
-            groundalb_noahmp(nsoil, NBAND, ice, ist, fsno, smc, albsnd, albsni, cosz, tg,
-                            albsat, albdry, alblak, albgrd, albgri);
+            if (d_use_nlcd40) {
+                const Real albedo = nlcd_params(nlcd_idx, SLMNLCD40::AlbMin) + nlcd_weight *
+                    (nlcd_params(nlcd_idx, SLMNLCD40::AlbMax) - nlcd_params(nlcd_idx, SLMNLCD40::AlbMin));
+                for (int ib = 0; ib < NBAND; ++ib) { albgrd[ib] = albedo; albgri[ib] = albedo; }
+            } else {
+                groundalb_noahmp(nsoil, NBAND, ice, ist, fsno, smc, albsnd, albsni, cosz, tg,
+                                albsat, albdry, alblak, albgrd, albgri);
+            }
 
             const bool has_canopy = vegetype_arr(i, j, 0) == 1 && fveg > zero && vai > zero;
             if (has_canopy) {
@@ -6121,7 +6330,11 @@ void SLM::radiation_noahmp (const amrex::MFIter &mfi)
         // Note: fsno and ist are already declared earlier (lines 5159, 5174)
         amrex::Real emg;
         if (ist == 1) {
-            emg = d_eg_soil * (1.0 - fsno) + d_snow_emis * fsno;
+            const Real ground_emis = d_use_nlcd40
+                ? nlcd_params(nlcd_idx, SLMNLCD40::EmisMin) + nlcd_weight *
+                  (nlcd_params(nlcd_idx, SLMNLCD40::EmisMax) - nlcd_params(nlcd_idx, SLMNLCD40::EmisMin))
+                : d_eg_soil;
+            emg = ground_emis * (1.0 - fsno) + d_snow_emis * fsno;
         } else {
             emg = d_eg_lake * (1.0 - fsno) + d_snow_emis * fsno;
         }

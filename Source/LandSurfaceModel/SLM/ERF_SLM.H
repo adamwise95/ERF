@@ -551,6 +551,9 @@ public:
     void validate_parameter_tables ();
 
     void init_from_params ();
+    void init_nlcd40_table ();
+    void apply_nlcd40_params ();
+    void update_nlcd40_roughness (const amrex::MFIter& mfi);
 
     /**
      * Loads built-in Noah-MP radiation lookup values for idealized SLM cases.
@@ -884,6 +887,10 @@ private:
 
     std::string parameter_file = "NoahmpTable.TBL";
     std::string veg_dataset = "modis"; // modis or usgs
+    std::string landuse_dataset = "auto"; // auto, modis, or nlcd40
+    bool wrfinput_nlcd40 = false;
+    bool use_nlcd40 = false;
+    amrex::TableData<amrex::Real, 2> nlcd40_table;
     std::string soil_dataset = "stas"; // stas or stas_ruc
     int num_landtypes = -1; // Number of land types in sai/lai, parameter tables
     int num_veg_params = -1;

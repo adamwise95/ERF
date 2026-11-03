@@ -3,6 +3,7 @@
 #include <AMReX_PlotFileUtil.H>
 #include "ERF_NCInterface.H"
 #include "ERF_ReadCheckpointMF.H"
+#include <sstream>
 
 using namespace amrex;
 
@@ -481,7 +482,7 @@ void SLM::WriteCheckpoint (const int &lev, const std::string &checkpointname) co
         // wrong for that one.  Written last so a checkpoint from before this simply
         // ends after the BoxArray and the reader keeps its old default.
         //
-        HeaderFile << first_step << " " << wrfinput_initialized << "\n";
+        HeaderFile << first_step << " " << wrfinput_initialized << " " << use_nlcd40 << "\n";
     }
 
     amrex::ParallelDescriptor::Barrier();
@@ -789,9 +790,18 @@ void SLM::ReadCheckpoint (const int &lev, const std::string &checkpointname)
     //
     int chk_first_step = 0;
     int chk_wrfinput_initialized = (use_wrfinput) ? 1 : 0;
+    int chk_nlcd40 = use_nlcd40 ? 1 : 0;
     {
-        int a, b;
-        if (is >> a >> b) { chk_first_step = a; chk_wrfinput_initialized = b; }
+        std::string lifecycle_line;
+        if (std::getline(is, lifecycle_line)) {
+            std::istringstream flags(lifecycle_line);
+            int a, b, c;
+            if (flags >> a >> b) {
+                chk_first_step = a;
+                chk_wrfinput_initialized = b;
+                if (flags >> c) { chk_nlcd40 = c; }
+            }
+        }
     }
 
     const std::string prefix = "SLM_";
@@ -937,6 +947,8 @@ void SLM::ReadCheckpoint (const int &lev, const std::string &checkpointname)
     //
     first_step           = (chk_first_step != 0);
     wrfinput_initialized = (chk_wrfinput_initialized != 0);
+    if (chk_nlcd40 != 0 && !use_nlcd40) { init_nlcd40_table(); }
+    use_nlcd40 = chk_nlcd40 != 0;
 
     // A checkpoint is written after Update_Lsm_Vars, so tref, qref and pref hold the state
     has_atmos_state         = true;
