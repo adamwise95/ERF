@@ -53,17 +53,12 @@ ERF::ErrorEst (int levc, TagBoxArray& tags, Real time, int /*ngrow*/)
 
         if (!nc_init_file[levc+1].empty())
         {
-            double levc_start_time = read_start_time_from_wrfinput(levc  , nc_init_file[levc  ][0]);
-            if (solverChoice.init_type == InitType::WRFInput) {
-                amrex::Print() << " WRFInput       time at level " << levc << " is " << levc_start_time << std::endl;
-            } else if (solverChoice.init_type == InitType::Metgrid) {
-                amrex::Print() << " met_em         time at level " << levc << " is " << levc_start_time << std::endl;
-            }
-
             for (int isub = 0; isub < num_subdomains; isub++) {
                 if (!have_read_nc_init_file[levc+1][isub])
                 {
-                    double levf_start_time = read_start_time_from_wrfinput(levc+1, nc_init_file[levc+1][isub]);
+                    double levf_start_time = (solverChoice.init_type == InitType::WRFInput) ?
+                        wrfinput_start_times[levc+1][isub] :
+                        read_start_time_from_wrfinput(levc+1, nc_init_file[levc+1][isub]);
                     if (solverChoice.init_type == InitType::WRFInput) {
                         amrex::Print() << " WRFInput start_time at level " << levc+1 << " is " << levf_start_time << std::endl;
                     } else if (solverChoice.init_type == InitType::Metgrid) {
@@ -74,7 +69,9 @@ ERF::ErrorEst (int levc, TagBoxArray& tags, Real time, int /*ngrow*/)
                     //     which one is the parent of the fine region we are trying to create
                     AMREX_ALWAYS_ASSERT(subdomains[levc].size() == 1);
 
-                    if ( levf_start_time <= (levc_start_time + t_new[levc]) ) {
+                    // time is elapsed from level 0's start on every level.  Adding it
+                    // to the parent's file time counts that parent's delay twice.
+                    if (levf_start_time - start_time <= static_cast<double>(time) + 1.e-6) {
                         if (solverChoice.init_type == InitType::WRFInput) {
                             amrex::Print() << " WRFInput file to read: " << nc_init_file[levc+1][isub] << std::endl;
                             subdomain = read_subdomain_from_wrfinput(levc, nc_init_file[levc+1][isub], ratio);

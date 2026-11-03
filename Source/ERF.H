@@ -1392,6 +1392,10 @@ private:
     // The cells at a level > 0 that its own init file covers
     amrex::Box nest_box_from_own_init_file (int lev);
 
+    // WRF nest activation uses the elapsed simulation clock at every level.
+    bool wrfinput_nest_due (int parent_lev, double elapsed_time) const;
+    double next_wrfinput_nest_time () const;
+
     // Maximum value of terrain read in from wrfinput at level 0
     amrex::Real z_top = zero;
 
@@ -2102,6 +2106,7 @@ private:
     // NetCDF initialization (wrfinput) file
     static amrex::Vector<amrex::Vector<std::string>> nc_init_file;
     static amrex::Vector<amrex::Vector<int>> have_read_nc_init_file;
+    amrex::Vector<amrex::Vector<double>> wrfinput_start_times;
 
     // NetCDF initialization (wrfbdy/met_em) file
     static std::string nc_bdy_file;

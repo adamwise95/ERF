@@ -76,8 +76,10 @@ NOAHMP::interp_from_lev0 (const int& lev,
 bool
 NOAHMP::time_to_fire (const Real& elapsed_time)
 {
+    // ITIMESTEP starts at one when this level's land file becomes active.
+    // Convert the global ERF clock to elapsed time since that file's date.
     Real NOAH_time = static_cast<Real>(m_itimestep-1) * m_dtbl;
-    if (elapsed_time < NOAH_time) {
+    if (static_cast<double>(elapsed_time) - m_time_origin < static_cast<double>(NOAH_time)) {
         m_updated = false;
         return false;
     }

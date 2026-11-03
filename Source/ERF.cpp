@@ -147,6 +147,40 @@ int  ERF::input_bndry_planes             = 0;
 #ifdef ERF_USE_NETCDF
 double read_start_time_from_wrfinput (int lev, const std::string& fname);
 double read_start_time_from_metgrid  (int lev, const std::string& fname);
+
+bool
+ERF::wrfinput_nest_due (int parent_lev, double elapsed_time) const
+{
+    if (solverChoice.init_type != InitType::WRFInput || parent_lev >= max_level) {
+        return false;
+    }
+    const int child_lev = parent_lev + 1;
+    const double tolerance = 1.e-6; // WRF Times has whole-second resolution
+    for (int i = 0; i < static_cast<int>(wrfinput_start_times[child_lev].size()); ++i) {
+        if (!have_read_nc_init_file[child_lev][i] &&
+            elapsed_time + tolerance >= wrfinput_start_times[child_lev][i] - start_time) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double
+ERF::next_wrfinput_nest_time () const
+{
+    double next_time = std::numeric_limits<double>::infinity();
+    if (solverChoice.init_type != InitType::WRFInput) { return next_time; }
+    // A child cannot be created before its parent.  Ignore its timestamp until
+    // that parent level exists, then use the same elapsed clock as level 0.
+    for (int lev = 1; lev <= amrex::min(max_level, finest_level + 1); ++lev) {
+        for (int i = 0; i < static_cast<int>(wrfinput_start_times[lev].size()); ++i) {
+            if (!have_read_nc_init_file[lev][i]) {
+                next_time = amrex::min(next_time, wrfinput_start_times[lev][i] - start_time);
+            }
+        }
+    }
+    return next_time;
+}
 #endif
 
 // advance solution to final time
@@ -3220,6 +3254,17 @@ ERF::restart ()
     ReadCheckpointFile();
 
 #ifdef ERF_USE_NETCDF
+    if (solverChoice.init_type == InitType::WRFInput) {
+        // The file-read flags are process state, not checkpoint data.  A nest
+        // already present in the checkpoint must not be scheduled again.  With
+        // one file on a level, its existence means that file was read.
+        for (int lev = 1; lev <= finest_level; ++lev) {
+            if (wrfinput_start_times[lev].size() == 1) {
+                have_read_nc_init_file[lev][0] = 1;
+            }
+        }
+    }
+
     //
     // The checkpoint carries every level's base state, but not the reference parameters
     // it was built from.  Recover them now, before anything can regrid: the first regrid
@@ -4083,6 +4128,19 @@ ERF::ReadParameters ()
             }
         }
     }
+
+#ifdef ERF_USE_NETCDF
+    if (solverChoice.init_type == InitType::WRFInput) {
+        wrfinput_start_times.resize(max_level + 1);
+        for (int lev = 1; lev <= max_level; ++lev) {
+            wrfinput_start_times[lev].resize(nc_init_file[lev].size());
+            for (int i = 0; i < static_cast<int>(nc_init_file[lev].size()); ++i) {
+                wrfinput_start_times[lev][i] =
+                    read_start_time_from_wrfinput(lev, nc_init_file[lev][i]);
+            }
+        }
+    }
+#endif
 
 #ifndef ERF_USE_NETCDF
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(( (solverChoice.init_type != InitType::WRFInput) &&

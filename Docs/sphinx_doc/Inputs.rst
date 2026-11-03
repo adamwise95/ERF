@@ -3609,6 +3609,12 @@ initialized by interpolation from its parent, and its base state is built from t
 level-0 reference profile evaluated at that level's own heights.  See
 :ref:`sec:nested-wrfinput` for the nesting options and their restrictions.
 
+For ``WRFInput``, each finer file's ``Times`` value schedules that nest on the
+level-0 simulation clock. ERF shortens a coarse time step if needed to reach
+that timestamp, then creates the nest as soon as its parent exists. Setting
+``erf.regrid_int`` is not required to activate a timed WRF nest; it still
+controls periodic regridding for other refinement changes.
+
 In addition, if **erf.use_real_bcs = true**, the lateral boundary conditions must be supplied in a NetCDF files
 specified by ``erf.nc_bdy_file`` (e.g., "wrfbdy_d01").  (If **erf.use_real_bcs = false**, no file is read for the
 boundary conditions so they must be specified in the inputs file.)

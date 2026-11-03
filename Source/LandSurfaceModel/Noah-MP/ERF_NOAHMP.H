@@ -77,6 +77,7 @@ public:
         // (SWDOWN, GLW, COSZEN); see the first-land-step check in Advance_With_State.
         m_radiation_feeds_lsm = sc.rad_feeds_lsm();
         m_radiation_model_name = amrex::getEnumNameString(sc.rad_type);
+        m_wrfinput_init = (sc.init_type == InitType::WRFInput);
         // A run initialized from WRF or metgrid files names a finer level's file with
         // erf.nc_init_file_<lev>; an idealized one has none (see Init).
         m_idealized_init = (sc.init_type != InitType::WRFInput &&
@@ -381,6 +382,10 @@ private:
     // decision is well-defined on land-free ranks too.
     amrex::Real m_dtbl = std::numeric_limits<amrex::Real>::max();
 
+    // Elapsed ERF time at this level's WRF input timestamp. Noah-MP's
+    // itimestep and calendar are relative to its own land setup file.
+    double m_time_origin = 0.0;
+
     // Default -1; not written at runtime (single-slab LSM has no z extent to track).
     int khi_lsm = -1;
 
@@ -431,6 +436,7 @@ private:
 
     // Does this level run the driver on a land setup file of its own? (See Init.)
     bool m_has_nc_file = false;
+    bool m_wrfinput_init = false;
 
     // Not initialized from WRF or metgrid files (set in Define).
     bool m_idealized_init = false;

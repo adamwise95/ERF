@@ -180,7 +180,11 @@ ERF::timeStep (int lev, double time, int /*iteration*/)
                            base_state[lev], base_state[lev]);
     }
 
-    if (regrid_int > 0)  // We may need to regrid
+    bool wrfinput_due = false;
+#ifdef ERF_USE_NETCDF
+    if (lev < max_level) { wrfinput_due = wrfinput_nest_due(lev, time); }
+#endif
+    if (regrid_int > 0 || wrfinput_due)  // Periodic regrid or a scheduled WRF nest
     {
         // help keep track of whether a level was already regridded
         // from a coarser level call to regrid
@@ -191,7 +195,8 @@ ERF::timeStep (int lev, double time, int /*iteration*/)
         // it was taken care of during a coarser regrid
         if (lev < max_level)
         {
-            if ( (istep[lev] % regrid_int == 0) && (istep[lev] > last_regrid_step[lev]) )
+            if (istep[lev] > last_regrid_step[lev] &&
+                (wrfinput_due || (regrid_int > 0 && istep[lev] % regrid_int == 0)))
             {
                 // regrid could add newly refine levels (if finest_level < max_level)
                 // so we save the previous finest level index

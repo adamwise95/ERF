@@ -24,6 +24,10 @@
 
 using namespace amrex;
 
+#ifdef ERF_USE_NETCDF
+double read_start_time_from_wrfinput (int lev, const std::string& fname);
+#endif
+
 namespace {
 
 bool
@@ -409,6 +413,19 @@ NOAHMP::Init (const int& lev,
                                     ? namelist_names_setup_file(lev) : false;
     m_has_nc_file = noahmp_level_runs_driver(lev, has_init_file, m_idealized_init,
                                              namelist_names_setup);
+    m_time_origin = 0.0;
+#ifdef ERF_USE_NETCDF
+    if (lev > 0 && m_wrfinput_init && m_has_nc_file && has_init_file &&
+        !nc_init_file[0].empty() && !nc_init_file[0][0].empty() &&
+        !nc_init_file[lev][0].empty()) {
+        // The fine file's SIMULATION_START_DATE is its own activation time,
+        // while ERF passes elapsed time since the level-0 file to Advance.
+        // Keep Noah-MP's firing schedule on the same local clock as its date.
+        const double coarse_start = read_start_time_from_wrfinput(0, nc_init_file[0][0]);
+        const double level_start = read_start_time_from_wrfinput(lev, nc_init_file[lev][0]);
+        m_time_origin = level_start - coarse_start;
+    }
+#endif
     if (lev > 0) {
         Print() << "Noah-MP at level " << lev << ": "
                 << (m_has_nc_file ? "runs the land model on its own setup file"
@@ -525,5 +542,3 @@ NOAHMP::Init (const int& lev,
     } // has nc_init_file
 
 };
-
-

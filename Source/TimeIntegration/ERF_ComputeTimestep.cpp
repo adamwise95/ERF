@@ -116,6 +116,16 @@ ERF::ComputeDt (int step, double cur_time_d)
         dt_0 = (stop_time - start_time) - cur_time_d;
     }
 
+#ifdef ERF_USE_NETCDF
+    // Make every level reach a pending wrfinput start time on a coarse-step
+    // boundary.  The regrid at the beginning of that step can then create the
+    // nest at its file timestamp even if regrid_int does not divide that step.
+    const double until_wrfinput = next_wrfinput_nest_time() - cur_time_d;
+    if (until_wrfinput > 1.e-6 && until_wrfinput < dt_0) {
+        dt_0 = until_wrfinput;
+    }
+#endif
+
     dt[0] = dt_0;
     for (int lev = 1; lev <= finest_level; ++lev) {
         dt[lev] = dt[lev-1] / nsubsteps[lev];
