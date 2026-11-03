@@ -54,7 +54,6 @@ SLM::writeSLM_NetCDF (const MultiFab& mf, const Vector<std::string>& varnames, c
     }
 
     writeMFtoNC(ncf, &cp_vege, "cp_vege", cur_time);
-    writeMFtoNC(ncf, &z0_sfc, "z0_sfc", cur_time);
 
     //writeMFtoNC(ncf, &Khai_L, "Khai_L", -1.0);
 

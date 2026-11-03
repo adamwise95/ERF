@@ -5326,6 +5326,7 @@ void SLM::writeSLM_Data (const PlotFileType plotfile_type, const amrex::Real cur
     mf_data.push_back(&IR_emis_vege);
     mf_data.push_back(&IR_emis_soil);
     mf_data.push_back(&zrefxy);
+    mf_data.push_back(&z0_sfc);
     mf_data.push_back(&vege_YES);
 
     mf_data.push_back(&LAI);
@@ -5406,6 +5407,7 @@ void SLM::writeSLM_Data (const PlotFileType plotfile_type, const amrex::Real cur
     varnames.push_back("IR_emis_veg");
     varnames.push_back("IR_emis_soil");
     varnames.push_back("zrefxy");
+    varnames.push_back("z0_sfc");
     varnames.push_back("veg_flag");
 
     varnames.push_back("LAI");

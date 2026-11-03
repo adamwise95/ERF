@@ -409,6 +409,8 @@ the ERF surface-layer and radiation couplings.  Its internal soil and canopy
 fields are available through SLM plotfile/checkpoint output.  Reference-file
 testing additionally updates the atmospheric reference state and surface
 forcing from the files listed above.
+With ``erf.plot_lsm = true``, the SLM AMReX and NetCDF outputs include
+``z0_sfc``, the land-use roughness length before SLM's wind-speed adjustment.
 
 Recent physics changes
 ----------------------
