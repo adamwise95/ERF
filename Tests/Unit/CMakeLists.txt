@@ -118,6 +118,9 @@ target_sources(${erf_exe_name}
     # Motivation: the roughness inverted from surface fluxes must stay inside its bounds.
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestInvertedRoughness.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestMOSTAverage.cpp
+    # Motivation: the MOST flux kernels must stay bounded and correctly signed at the
+    # stable fold of a prescribed flux and when the log-law bracket would change sign.
+    ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestMOSTIteration.cpp
     # Motivation: the MOST reference height must use the true stretched cell
     # centers, and a query on a mesh face must be found rather than abort.
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestMOSTAverageZref.cpp
@@ -334,6 +337,9 @@ target_sources(${erf_exe_name}
     # Motivation: the log-law coarse/fine fill must keep the flux of every coarse face and share
     # the wall face's flux by ln(1 + z/z0), closing the solid sub-faces of immersed terrain.
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestCFLogLawFill.cpp
+    # Motivation: the relax band of the coarse/fine fill patcher must follow the top face of a
+    # level that stops below the domain top, and not appear along the physical top or bottom.
+    ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestFillPatcherRelaxBand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngScalar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngKernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/EOS/ERF_GTestEOSScalar.cpp
